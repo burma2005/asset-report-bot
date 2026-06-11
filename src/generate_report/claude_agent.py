@@ -228,7 +228,6 @@ def _build_alerts(assets: dict, prices: dict) -> list[dict]:
 # ── 梗圖引擎（本地圖庫，依資產狀態挑三張：市場/配置/進度）──
 
 import base64
-import random
 
 MEME_DIR = os.path.join(os.path.dirname(__file__), "memes")
 
@@ -260,18 +259,36 @@ MEME_LIBRARY: dict[str, list[tuple[str, str]]] = {
 }
 
 
-def _load_meme(mood: str, slot: str, context: str) -> dict | None:
-    """slot：插入報告的段落位置（alerts/allocation/retirement）
-    context：該段落要被俏皮呼應的字眼（顯示在圖旁）"""
+def _load_meme(
+    mood: str, slot: str, context: str,
+    used: set | None = None,
+) -> dict | None:
+    """slot：插入報告的段落位置（alerts/allocation/retirement/drawdown）
+    context：該段落要被俏皮呼應的字眼（顯示在圖旁）
+    used：同一份報告已用過的檔名集合——優先挑未用過的，避免整份報告重複同圖"""
     candidates = MEME_LIBRARY.get(mood, [])
     if not candidates:
         return None
-    filename, caption = random.choice(candidates)
+
+    pool = candidates
+    if used is not None:
+        unused = [c for c in candidates if c[0] not in used]
+        if not unused:
+            # 同 mood 圖片用罄 → 從備用 mood 補（grind → neutral）
+            for fb in ("grind", "neutral"):
+                unused = [c for c in MEME_LIBRARY.get(fb, []) if c[0] not in used]
+                if unused:
+                    break
+        pool = unused or candidates   # 全部用過則允許重複
+
+    filename, caption = pool[0]       # 取序確定性：清單順序即優先序
     try:
         with open(os.path.join(MEME_DIR, filename), "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
     except Exception:
         return None
+    if used is not None:
+        used.add(filename)
     return {"mood": mood, "slot": slot, "context": context, "caption": caption,
             "data_uri": f"data:image/jpeg;base64,{b64}"}
 
@@ -281,6 +298,7 @@ def _pick_memes(
     progress_pct: float | None,
     signals: dict,
     crypto_pct: float,
+    used: set | None = None,
 ) -> list[dict]:
     """依情境挑圖，每張綁定報告段落（slot）與呼應字眼（context）"""
     memes: list[dict] = []
@@ -293,17 +311,17 @@ def _pick_memes(
     max_down = min(changes) if changes else 0
 
     if has_depeg:
-        m = _load_meme("depeg", "alerts", "穩定幣聲稱錨定 1 USD？")
+        m = _load_meme("depeg", "alerts", "穩定幣聲稱錨定 1 USD？", used)
     elif max_down <= -10:
-        m = _load_meme("crash", "alerts", f"24h 最大跌幅 {max_down:.1f}%")
+        m = _load_meme("crash", "alerts", f"24h 最大跌幅 {max_down:.1f}%", used)
     elif max_down <= -5 and max_up >= 5:
-        m = _load_meme("flipflop", "alerts", "昨漲今跌，市場變臉")
+        m = _load_meme("flipflop", "alerts", "昨漲今跌，市場變臉", used)
     elif max_down <= -5:
-        m = _load_meme("dip", "alerts", f"24h 下跌 {max_down:.1f}%")
+        m = _load_meme("dip", "alerts", f"24h 下跌 {max_down:.1f}%", used)
     elif max_up >= 10:
-        m = _load_meme("pump_big", "alerts", f"24h 大漲 {max_up:.1f}%")
+        m = _load_meme("pump_big", "alerts", f"24h 大漲 {max_up:.1f}%", used)
     elif max_up >= 5:
-        m = _load_meme("pump", "alerts", f"24h 上漲 {max_up:.1f}%")
+        m = _load_meme("pump", "alerts", f"24h 上漲 {max_up:.1f}%", used)
     else:
         m = None
     if m:
@@ -312,7 +330,7 @@ def _pick_memes(
     # 2) 配置分析區：加密佔比過高 →「對健康不好喔」
     if crypto_pct >= 40:
         m = _load_meme("unhealthy", "allocation",
-                       f"加密部位佔 {crypto_pct:.0f}%，波動集中")
+                       f"加密部位佔 {crypto_pct:.0f}%，波動集中", used)
         if m:
             memes.append(m)
 
@@ -329,7 +347,7 @@ def _pick_memes(
         prog, ctx = "grind", f"達成率 {progress_pct:.0f}%，還在路上"
     else:
         prog, ctx = "poor", f"達成率僅 {progress_pct:.0f}%"
-    m = _load_meme(prog, "retirement", ctx)
+    m = _load_meme(prog, "retirement", ctx, used)
     if m:
         memes.append(m)
 
@@ -427,7 +445,7 @@ def select_news(news_raw: list[dict]) -> list[dict]:
 
 # 台灣官方統計基準（行政院主計總處，定期手動更新）
 TW_BENCHMARKS = [
-    {"name": "官方最低生活費（台灣省）", "amount": 15515, "year": "2025"},
+    {"name": "台灣官方最低生活費", "amount": 15515, "year": "2025"},
     {"name": "全國平均每人月消費支出",   "amount": 24574, "year": "2023"},
     {"name": "受僱員工月薪中位數",       "amount": 43167, "year": "2023"},
 ]
@@ -633,8 +651,9 @@ def generate_portfolio_data(
     signals = prices.get("signals", {})
     crypto_pct = next(
         (g["pct"] for g in validated["groups"] if g["name"] == "加密部位"), 0)
+    used_memes: set = set()
     validated["memes"] = _pick_memes(
-        validated["alerts"], progress_pct, signals, crypto_pct)
+        validated["alerts"], progress_pct, signals, crypto_pct, used_memes)
 
     # 三個獨立 AI 呼叫平行執行（建議 / 新聞精選 / 花費規劃），縮短總延遲
     from concurrent.futures import ThreadPoolExecutor
@@ -670,6 +689,7 @@ def generate_portfolio_data(
                 b64 = base64.b64encode(f.read()).decode()
             r["meme"] = {"caption": caption,
                          "data_uri": f"data:image/jpeg;base64,{b64}"}
+            used_memes.add(filename)
             meme_count += 1
         except Exception:
             pass
@@ -696,7 +716,7 @@ def generate_portfolio_data(
                 mood = "grind"
             else:
                 mood = "poor"
-            m = _load_meme(mood, "drawdown", "")
+            m = _load_meme(mood, "drawdown", "", used_memes)
             if m:
                 sc["meme"] = {"caption": m["caption"], "data_uri": m["data_uri"]}
     validated["drawdown"] = drawdown
