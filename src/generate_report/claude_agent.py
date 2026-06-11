@@ -118,8 +118,12 @@ def _build_asset_lines(assets: dict, prices: dict) -> list[dict]:
             value      = round(qty * price) if price else 0
             unit_price = round(price, 4) if price else None
 
+        # API 查無此代號 → 標示來源，報告中由警示區提醒
+        if api in ("binance", "yahoo") and p_native is None:
+            source = "查無報價"
+
         asset_lines.append({
-            "symbol": sym, "name": name, "category": cat,
+            "symbol": sym, "name": name, "category": cat, "api": api,
             "amount": qty, "unit": unit, "field": field,
             "price_native": round(p_native, 6) if p_native is not None else None,
             "currency": currency,
@@ -175,28 +179,8 @@ categories 必須使用以下子類別名稱（依實際持有產生）：
     return _extract_json(raw)
 
 
-# ── Step 2：Sonnet 驗證與補全 ────────────────────────
-
-_SONNET_SYSTEM = """你是資料品質審核員。檢查並修正輸入的 JSON 財務報告資料。
-
-嚴格規則：
-1. 絕對不可更改任何 value_twd、amount、price_twd 原始數字
-2. 只允許修正：pct（重新計算為 value_twd/total×100）、total_twd（重新加總）、retirement 數字（total×4%）、缺漏的 note 欄位
-3. pct 加總應約等於 100
-
-只輸出修正後的完整 JSON，不要說明。"""
-
-def step2_sonnet_validate(summary: dict, total_twd: float) -> dict:
-    """Sonnet：驗證 Haiku 輸出，補全缺漏欄位"""
-    prompt = f"""請驗證並修正以下財務報告 JSON。
-total_twd 應為 {round(total_twd)}，annual_4pct_twd = total × 4%，monthly = annual / 12。
-確保 assets 的 pct 加總為 100，categories 的 pct 加總為 100。
-
-輸入 JSON:
-{json.dumps(summary, ensure_ascii=False, indent=2)}"""
-
-    raw = _call_bedrock(SONNET_MODEL, _SONNET_SYSTEM, prompt, max_tokens=4096)
-    return _extract_json(raw)
+# 註：原 Step 2「Sonnet 數字驗證」已移除——所有數字（市值/占比/類別彙總）
+# 改由 generate_portfolio_data 內純 Python 計算，更便宜也更可靠。
 
 
 # ── 異常示警（確定性 Python 邏輯，不依賴 AI）─────────
@@ -373,6 +357,7 @@ def generate_recommendations(
     signals: dict,
     monthly_income_twd: float = 0,
     goal_monthly_twd: float = 0,
+    advice_model: str = "haiku",
 ) -> list[dict]:
     income_line = (
         f"月收入 NT$ {round(monthly_income_twd):,}，月生活費 NT$ {round(goal_monthly_twd):,}，"
@@ -393,7 +378,8 @@ def generate_recommendations(
 請給出操作建議（需考量收支狀況：有儲蓄力可建議定期定額標的與金額；已退休則重視防禦）。"""
 
     try:
-        raw = _call_bedrock(SONNET_MODEL, _ADVICE_SYSTEM, prompt, max_tokens=1024)
+        model_id = SONNET_MODEL if advice_model == "sonnet" else HAIKU_MODEL
+        raw = _call_bedrock(model_id, _ADVICE_SYSTEM, prompt, max_tokens=1024)
         start = raw.find("[")
         end   = raw.rfind("]") + 1
         if start == -1:
@@ -486,7 +472,7 @@ def generate_spending_plan(
 若已退休：聚焦控制花費與提領節奏。"""
 
     try:
-        raw  = _call_bedrock(SONNET_MODEL, _SPENDING_SYSTEM, prompt, max_tokens=1024)
+        raw  = _call_bedrock(HAIKU_MODEL, _SPENDING_SYSTEM, prompt, max_tokens=1024)
         plan = _extract_json(raw)
         # 程式碼端強制補上基準數據與用戶數字（不信任模型）
         plan["monthly_twd"] = round(goal_monthly_twd)
@@ -568,31 +554,43 @@ def generate_portfolio_data(
     prices: dict,
     retirement_goal_monthly_twd: float = 0,
     monthly_income_twd: float = 0,
+    advice_model: str = "haiku",
 ) -> dict:
     """
-    執行雙模型流程，回傳可注入 HTML 模板的 PORTFOLIO_DATA dict。
+    回傳可注入 HTML 模板的 PORTFOLIO_DATA dict。
+    advice_model：操作建議使用的模型（"haiku" 預設 / "sonnet" 品質較佳）
     """
-    summary    = step1_haiku_summarize(assets, prices)
-    total_twd  = sum(a.get("value_twd", 0) for a in summary.get("assets", []))
-    validated  = step2_sonnet_validate(summary, total_twd)
+    # Haiku 只負責 note 標註與退休短評；所有數字由下方純 Python 計算
+    summary   = step1_haiku_summarize(assets, prices)
+    validated = summary
 
-    # ── 以下全部由程式碼決定，不信任模型輸出 ──
+    # ── 數字全部由程式碼決定，不信任模型輸出 ──
 
-    # 數量/原幣報價/來源/市值：以程式碼計算值強制回寫（防止 AI 改動或遺漏）
-    truth = {a["symbol"]: a for a in _build_asset_lines(assets, prices)}
-    for a in validated.get("assets", []):
-        t = truth.get(a.get("symbol"))
-        if not t:
-            continue
-        for k in ("amount", "unit", "price_native", "currency",
-                  "source", "price_twd", "value_twd"):
-            a[k] = t[k]
+    # 真相來源：數量/原幣報價/來源/市值（API 原始數據計算）
+    truth_lines = _build_asset_lines(assets, prices)
+    total_twd   = sum(a["value_twd"] for a in truth_lines)
+    validated["total_twd"] = round(total_twd)
 
-    # 占比由高至低排序
-    validated["assets"] = sorted(
-        validated.get("assets", []), key=lambda a: a.get("value_twd", 0), reverse=True)
+    # 以 truth 為準重建 assets（只保留 Haiku 的 note 欄位）
+    notes = {a.get("symbol"): a.get("note", "")
+             for a in summary.get("assets", [])}
+    rebuilt = []
+    for t in truth_lines:
+        item = dict(t)
+        item["pct"]  = round(t["value_twd"] / total_twd * 100, 2) if total_twd else 0
+        item["note"] = notes.get(t["symbol"], "")
+        rebuilt.append(item)
+    validated["assets"] = sorted(rebuilt, key=lambda a: a["value_twd"], reverse=True)
+
+    # 子類別彙總（純 Python，由 truth 的 category 分組）
+    cats: dict[str, float] = {}
+    for t in truth_lines:
+        cats[t["category"]] = cats.get(t["category"], 0) + t["value_twd"]
     validated["categories"] = sorted(
-        validated.get("categories", []), key=lambda c: c.get("value_twd", 0), reverse=True)
+        [{"name": c, "value_twd": round(v),
+          "pct": round(v / total_twd * 100, 2) if total_twd else 0}
+         for c, v in cats.items()],
+        key=lambda x: x["value_twd"], reverse=True)
 
     # 部位群組彙總（現金/加密/股票/債券四大部位）
     groups: dict[str, float] = {}
@@ -620,6 +618,17 @@ def generate_portfolio_data(
     # 異常示警（確定性邏輯）
     validated["alerts"] = _build_alerts(assets, prices)
 
+    # 查無報價警示：用戶輸入的代號 API 找不到（打錯字或不支援），避免靜默歸零
+    for t in truth_lines:
+        if t["api"] in ("binance", "yahoo") and t.get("price_native") is None:
+            validated["alerts"].append({
+                "level": "warning", "symbol": t["symbol"],
+                "title": f"{t['symbol']} 查無報價",
+                "detail": ("API 查不到此代號，市值以 0 計入。請確認拼字是否正確"
+                           "（加密貨幣需 Binance 有 USDT 交易對；股票需 Yahoo Finance 支援，"
+                           "台股加 .TW、日股加 .T 等市場後綴）"),
+            })
+
     # 梗圖（市場情緒 / 配置健康 / 退休進度，最多三張）
     signals = prices.get("signals", {})
     crypto_pct = next(
@@ -632,7 +641,8 @@ def generate_portfolio_data(
     with ThreadPoolExecutor(max_workers=3) as pool:
         fut_recs = pool.submit(
             generate_recommendations,
-            validated, signals, monthly_income_twd, retirement_goal_monthly_twd)
+            validated, signals, monthly_income_twd, retirement_goal_monthly_twd,
+            advice_model)
         fut_news = pool.submit(select_news, prices.get("news_raw", []))
         fut_plan = pool.submit(
             generate_spending_plan,
@@ -674,7 +684,25 @@ def generate_portfolio_data(
     validated["spending_plan"] = plan
 
     # 資產耐久試算（首年提領 = 月花費×12，逐年通膨 2% 調整）
-    validated["drawdown"] = simulate_drawdown(total_twd, retirement_goal_monthly_twd)
+    drawdown = simulate_drawdown(total_twd, retirement_goal_monthly_twd)
+    if drawdown:
+        # 各情境依可撐年數配梗圖：<25年 poor / <40年 grind / <60年 happy / 永續 victory
+        for sc in drawdown["scenarios"]:
+            if sc["sustainable"]:
+                mood = "victory"
+            elif sc["years"] >= 40:
+                mood = "happy"
+            elif sc["years"] >= 25:
+                mood = "grind"
+            else:
+                mood = "poor"
+            m = _load_meme(mood, "drawdown", "")
+            if m:
+                sc["meme"] = {"caption": m["caption"], "data_uri": m["data_uri"]}
+    validated["drawdown"] = drawdown
+
+    # 波動資產日線 K 線（近 90 日，模板渲染蠟燭圖）
+    validated["klines"] = prices.get("klines", {})
 
     # 產生時間（台北時間）
     taipei = timezone(timedelta(hours=8))

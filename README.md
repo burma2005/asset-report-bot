@@ -1,41 +1,45 @@
 # Asset Report Bot — 無伺服器資產報告產生器
 
-填入持倉 → 一鍵產出含即時報價、配置圖表、退休試算、風險示警與梗圖的 HTML 報告。
-全無伺服器（AWS Lambda），閒置零成本，每次產報告約 **NT$ 2~3**（詳見下方定價試算）。
+填入持倉 → 一鍵產出含即時報價、日線 K 圖、配置圖表、退休試算、風險示警與梗圖的 HTML 報告。
+全無伺服器（AWS Lambda），閒置零成本，預設 Haiku 模式每次約 **NT$ 0.5**。
+
+> 📊 **範例報告**：[線上預覽](https://htmlpreview.github.io/?https://github.com/burma2005/asset-report-bot/blob/main/docs/sample_report.html)
+> ｜[下載 docs/sample_report.html](docs/sample_report.html)（範例數據，非真實持倉）
 
 ---
 
 ## 系統架構
 
 ```mermaid
+%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'20px'}, 'flowchart': {'nodeSpacing': 60, 'rankSpacing': 70}}}%%
 flowchart TB
-    subgraph Local["💻 本地（使用者電腦）"]
-        UI["index.html<br/>資產輸入頁（分類表單 + localStorage）"]
-        RPT["portfolio_report.html<br/>產出的報告（自動下載）"]
+    UI["💻 index.html 輸入頁<br/>（本地瀏覽器）"]
+    FURL["Lambda Function URL<br/>X-Api-Key 驗證"]
+    LB["⚙️ Lambda<br/>Python 3.11 / ARM64"]
+    RPT["📊 報告 HTML<br/>（自動下載）"]
+
+    UI -->|"POST 資產 JSON"| FURL --> LB
+    LB -->|"完整 HTML"| UI --> RPT
+```
+
+```mermaid
+%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'20px'}, 'flowchart': {'nodeSpacing': 60, 'rankSpacing': 70}}}%%
+flowchart LR
+    LB["⚙️ Lambda"]
+
+    subgraph APIs["📡 官方資料來源"]
+        BN["Binance<br/>幣價・24h・K線"]
+        YF["Yahoo Finance<br/>股價・新聞・K線"]
+        FK["Frankfurter<br/>匯率"]
     end
 
-    subgraph AWS["☁️ AWS 東京區 ap-northeast-1"]
-        FURL["Lambda Function URL<br/>（CORS + 最長 120s）"]
-        LB["Lambda: asset-report-generator<br/>Python 3.11 / ARM64 / 512MB"]
-
-        subgraph Bedrock["Amazon Bedrock（jp. 推理檔）"]
-            HK["Claude Haiku 4.5<br/>數據彙整・新聞精選"]
-            SN["Claude Sonnet 4.6<br/>數據驗證・操作建議・花費規劃"]
-        end
+    subgraph AI["🤖 Amazon Bedrock"]
+        HK["Haiku 4.5<br/>彙整・新聞・建議"]
+        SN["Sonnet 4.6<br/>建議（可選）"]
     end
 
-    subgraph APIs["📡 官方資料來源（嚴禁 AI 亂搜）"]
-        BN["Binance API<br/>加密貨幣報價 + 24h漲跌"]
-        YF["Yahoo Finance API<br/>台/美/日股報價 + 新聞"]
-        FK["Frankfurter API<br/>USD/JPY→TWD 匯率（歐洲央行）"]
-    end
-
-    UI -- "POST assets JSON<br/>X-Api-Key 驗證" --> FURL
-    FURL --> LB
     LB <--> BN & YF & FK
     LB <--> HK & SN
-    LB -- "完整 HTML 字串" --> FURL --> UI
-    UI -- "Blob 下載" --> RPT
 ```
 
 ---
@@ -73,52 +77,52 @@ Body:
 ## Lambda 工作流
 
 ```mermaid
+%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'18px'}}}%%
 sequenceDiagram
     participant U as index.html
     participant L as Lambda
-    participant API as 官方 API ×3
-    participant H as Bedrock Haiku 4.5
-    participant S as Bedrock Sonnet 4.6
+    participant API as 官方 API
+    participant AI as Bedrock
 
-    U->>L: POST（X-Api-Key + assets JSON）
-    L->>L: ① 驗證 API Key（失敗→401 直接結束）
-    par 並行抓取（asyncio）
-        L->>API: Binance 24h ticker（加密報價+漲跌）
-        L->>API: Yahoo chart（股票報價+漲跌）
-        L->>API: Frankfurter（USD/JPY→TWD 匯率）
-        L->>API: Yahoo search（持倉相關新聞）
+    U->>L: POST（X-Api-Key + assets）
+    L->>L: ① 驗證 Key（失敗→401）
+    par 並行抓取
+        L->>API: Binance 報價+24h+K線
+        L->>API: Yahoo 股價+新聞+K線
+        L->>API: Frankfurter 匯率
     end
-    L->>H: ② Haiku：彙整市值/占比/類別 JSON
-    L->>S: ③ Sonnet：驗證數字（嚴禁更改原始值）
-    L->>L: ④ 程式碼強制回寫：數量/報價/來源/市值<br/>排序、四大部位、退休進度、耐久試算、示警、梗圖
-    par 並行 AI 呼叫（ThreadPool）
-        L->>S: ⑤a Sonnet：操作建議（含收支狀況）
-        L->>H: ⑤b Haiku：新聞精選 1~3 則（轉繁中）
-        L->>S: ⑤c Sonnet：花費規劃（vs 台灣官方基準）
+    L->>AI: ② Haiku 標註 note
+    L->>L: ③ 純 Python 計算<br/>市值/占比/排序/退休/耐久/示警/梗圖
+    par 並行 AI
+        L->>AI: ④a 操作建議（Haiku 或 Sonnet，前端選）
+        L->>AI: ④b Haiku 新聞精選
+        L->>AI: ④c Haiku 花費規劃
     end
-    L->>L: ⑥ 注入 report_template.html（梗圖 base64 內嵌）
-    L-->>U: 200 + 完整 HTML（~500KB）
+    L->>L: ⑤ 注入模板（梗圖+K線內嵌）
+    L-->>U: 200 + HTML（~800KB）
 ```
 
 ### 確定性 vs AI 的分工原則
 
 | 計算 | 執行者 | 原因 |
 |------|--------|------|
-| 報價抓取、匯率換算、市值計算 | 純 Python | 數字不容 AI 幻覺 |
-| 排序、退休進度、耐久試算（通膨提領模擬）、異常示警 | 純 Python | 同上 |
-| 數量/報價/來源欄位 | Python 強制回寫 | AI 驗證後仍以 API 原值覆蓋 |
-| 占比驗證、note 標註 | Sonnet（限制只修 pct） | 容錯補全 |
-| 操作建議、花費規劃文字、新聞精選 | Sonnet / Haiku | 諮詢性質內容 |
+| 報價/匯率/K線抓取、市值與占比計算 | 純 Python | 數字不容 AI 幻覺 |
+| 排序、類別彙總、退休進度、耐久試算、異常示警 | 純 Python | 同上 |
+| note 標註（活期鎖定、殖利率等） | Haiku | 純文字標籤 |
+| 操作建議 | Haiku（預設）或 Sonnet（前端選） | 諮詢性質內容 |
+| 花費規劃、新聞精選 | Haiku | 諮詢性質內容 |
 | 梗圖選擇 | 純 Python 規則 | 依訊號/進度確定性對應 |
 
 ## 調用的模型
 
 | 模型 | Bedrock Model ID | 用途 | 每次費用 |
 |------|-----------------|------|---------|
-| Claude Haiku 4.5 | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | 數據彙整、新聞精選 | ~$0.002 |
-| Claude Sonnet 4.6 | `jp.anthropic.claude-sonnet-4-6` | 數據驗證、操作建議、花費規劃 | ~$0.025 |
+| Claude Haiku 4.5 | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | note 標註、新聞精選、花費規劃、操作建議（預設） | ~$0.012 |
+| Claude Sonnet 4.6 | `jp.anthropic.claude-sonnet-4-6` | 操作建議（前端可選，分析較深入） | +$0.018 |
 
-> `jp.` 前綴 = 日本境內推理檔（資料不出境）。Lambda 以 IAM Role 授權，**無需 Anthropic API Key**。
+> 預設部署於東京區並使用 `jp.` 推理檔；**Region 由使用者自行決定**——改 `samconfig.toml` 的 `region`
+> 與 `template.yaml` 的 `BEDROCK_*_MODEL` 前綴（如 `us.` / `apac.` / `global.`）即可。
+> Lambda 以 IAM Role 授權，**無需 Anthropic API Key**。
 
 ## 報告內容
 
@@ -126,7 +130,8 @@ sequenceDiagram
 2. **七子類別 KPI 卡**：鏈上現金／鏈下現金／加密部位／台股／日股／美股／債券
 3. **資產配置比例圖**：深色卡片＋編號圖例（持有數量 × 原幣報價｜來源｜TWD 市值），占比由高至低
 4. **四大部位圖**：現金／加密／股票／債券
-5. **風險示警**：穩定幣脫鉤（±0.5%/±3%）、24h 暴跌（加密 -5%/-10%、股票 -4%/-7%）
+5. **波動資產日線 K 圖**：近 90 日蠟燭圖（Binance/Yahoo 官方 K 線數據）
+6. **風險示警**：穩定幣脫鉤（±0.5%/±3%）、24h 暴跌（加密 -5%/-10%、股票 -4%/-7%）、查無報價提醒
 6. **持倉相關新聞**：Yahoo 官方新聞 API → Haiku 精選 1~3 則（可點擊原文）
 7. **操作建議**：加碼/減碼/不動/觀察/再平衡 + 理由（納入月收入與退休狀態）
 8. **資產明細表**：數量、原幣報價、來源標籤、TWD 市值、占比條
@@ -139,25 +144,24 @@ sequenceDiagram
 
 > 以東京區（ap-northeast-1）2026 年牌價估算，實際以 AWS 帳單為準。
 
-### 每次產生報告的成本拆解
+### 每次產生報告的成本拆解（預設 Haiku 模式）
 
 | 項目 | 用量 | 單價 | 小計（USD） |
 |------|------|------|------------|
-| Lambda 運算 | ARM64 512MB × ~30s = 15 GB-s | $0.0000133/GB-s | $0.0002 |
-| Lambda 請求 | 1 次 | $0.20/百萬次 | ~$0 |
-| Function URL | — | 免費 | $0 |
-| Bedrock Haiku 4.5 ×2（彙整+新聞）| ~3K in / 1.5K out tokens | $1 / $5 per MTok | ~$0.011 |
-| Bedrock Sonnet 4.6 ×3（驗證+建議+規劃）| ~6K in / 3K out tokens | $3 / $15 per MTok | ~$0.063 |
-| 回傳流量 | ~0.5 MB | $0.114/GB | ~$0 |
-| **每次合計** | | | **~$0.074（≈ NT$ 2.4）** |
+| Lambda 運算 | ARM64 512MB × ~17s | $0.0000133/GB-s | $0.0001 |
+| Lambda 請求 + Function URL | 1 次 | 近乎免費 | ~$0 |
+| Bedrock Haiku 4.5 ×4（標註+新聞+規劃+建議）| ~6K in / 3K out tokens | $1 / $5 per MTok | ~$0.012 |
+| 回傳流量 | ~0.8 MB | $0.114/GB | ~$0 |
+| **每次合計（Haiku 模式）** | | | **~$0.015（≈ NT$ 0.5）** |
+| 改選 Sonnet 操作建議 | +1 次 Sonnet 呼叫 | $3 / $15 per MTok | +$0.018（合計 ≈ NT$ 1）|
 
-### 月費情境
+### 月費情境（預設 Haiku 模式）
 
-| 使用頻率 | 月報告數 | Bedrock | Lambda 等 | 月費（USD） | 月費（TWD） |
-|---------|---------|---------|-----------|------------|------------|
-| 每週 1 次 | 4 | $0.30 | ~$0 | **$0.30** | ~NT$ 10 |
-| 每日 1 次 | 30 | $2.22 | $0.01 | **$2.23** | ~NT$ 72 |
-| 每日 3 次 | 90 | $6.66 | $0.02 | **$6.68** | ~NT$ 215 |
+| 使用頻率 | 月報告數 | 月費（USD） | 月費（TWD） |
+|---------|---------|------------|------------|
+| 每週 1 次 | 4 | **$0.06** | ~NT$ 2 |
+| 每日 1 次 | 30 | **$0.45** | ~NT$ 15 |
+| 每日 3 次 | 90 | **$1.35** | ~NT$ 44 |
 
 ### 與常駐方案對比
 
@@ -167,8 +171,7 @@ sequenceDiagram
 | EC2 t4g.small 常駐 + n8n | ~$12 + AI 費用 | 24/7 計費，閒置也燒錢 |
 | n8n Cloud + 外部 LLM API | $20 起 | 執行次數另有上限 |
 
-> 降費技巧：把 Sonnet 任務（建議/花費規劃）換成 Haiku 可再省 ~80% Bedrock 費用，
-> 代價是文字品質略降——改 `template.yaml` 的 `BEDROCK_SONNET_MODEL` 環境變數即可。
+> 操作建議的模型（Haiku/Sonnet）可在輸入頁直接選擇，預設 Haiku。
 
 ## 部署
 

@@ -89,6 +89,71 @@ async def fetch_yahoo_prices(
     return dict(zip(symbols, results))
 
 
+# ── 日線 K 線（近 90 日 OHLC，嵌入報告蠟燭圖）───────────
+
+STABLE_USD = {"RWUSD", "USDT", "USDC", "FDUSD", "DAI", "TUSD"}
+
+
+async def _fetch_binance_klines(client: httpx.AsyncClient, sym: str) -> list | None:
+    try:
+        resp = await client.get(
+            "https://api.binance.com/api/v3/klines",
+            params={"symbol": f"{sym.upper()}USDT", "interval": "1d", "limit": 90},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        # [openTime, open, high, low, close, ...] → {t,o,h,l,c}
+        return [
+            {"t": k[0], "o": float(k[1]), "h": float(k[2]),
+             "l": float(k[3]), "c": float(k[4])}
+            for k in resp.json()
+        ]
+    except Exception:
+        return None
+
+
+async def _fetch_yahoo_klines(client: httpx.AsyncClient, sym: str) -> list | None:
+    try:
+        resp = await client.get(
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{sym.upper()}",
+            params={"range": "3mo", "interval": "1d"},
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=8,
+        )
+        resp.raise_for_status()
+        result = resp.json()["chart"]["result"][0]
+        ts = result["timestamp"]
+        q  = result["indicators"]["quote"][0]
+        out = []
+        for i, t in enumerate(ts):
+            o, h, l, c = q["open"][i], q["high"][i], q["low"][i], q["close"][i]
+            if None in (o, h, l, c):
+                continue
+            out.append({"t": t * 1000, "o": round(o, 4), "h": round(h, 4),
+                        "l": round(l, 4), "c": round(c, 4)})
+        return out or None
+    except Exception:
+        return None
+
+
+async def fetch_klines(client: httpx.AsyncClient, assets: dict) -> dict:
+    """波動資產（加密非穩定幣 + 股票）的近 90 日日線，現金/債券/穩定幣跳過"""
+    tasks: dict[str, object] = {}
+    for sym, d in assets.items():
+        api = d.get("api", "")
+        if api == "binance" and sym.upper() not in STABLE_USD:
+            tasks[sym] = _fetch_binance_klines(client, sym)
+        elif api == "yahoo":
+            tasks[sym] = _fetch_yahoo_klines(client, sym)
+    if not tasks:
+        return {}
+    results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+    return {
+        sym: r for sym, r in zip(tasks.keys(), results)
+        if r and not isinstance(r, Exception)
+    }
+
+
 # ── 持倉相關新聞（Yahoo Finance 官方搜尋/新聞 API）──────
 
 async def _fetch_news_one(client: httpx.AsyncClient, query: str) -> list[dict]:
@@ -162,15 +227,18 @@ async def fetch_all_prices(assets: dict) -> dict:
     yahoo_syms   = [s for s, d in assets.items() if d.get("api") == "yahoo"]
 
     async with httpx.AsyncClient() as client:
-        fx, binance_px, yahoo_px, news_raw = await asyncio.gather(
+        fx, binance_px, yahoo_px, news_raw, klines = await asyncio.gather(
             fetch_fx_rates(client),
             fetch_binance_prices(client, binance_syms) if binance_syms else _empty(),
             fetch_yahoo_prices(client, yahoo_syms),
             fetch_news(client, assets),
+            fetch_klines(client, assets),
             return_exceptions=True,
         )
     if isinstance(news_raw, Exception):
         news_raw = []
+    if isinstance(klines, Exception):
+        klines = {}
 
     usd_twd = fx["USD_TWD"] if not isinstance(fx, Exception) else 32.0
     jpy_twd = fx["JPY_TWD"] if not isinstance(fx, Exception) else 0.22
@@ -258,6 +326,7 @@ async def fetch_all_prices(assets: dict) -> dict:
         "fx":            {"USD_TWD": usd_twd, "JPY_TWD": jpy_twd},
         "signals":       signals,
         "news_raw":      news_raw,
+        "klines":        klines,
         "fetched_at":    datetime.now(timezone.utc).isoformat(),
     }
 

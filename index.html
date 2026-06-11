@@ -269,6 +269,16 @@
     <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">萬 台幣</span>
     <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 已退休請填 0，用於計算儲蓄力與花費建議</span>
   </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;">
+    <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">操作建議模型</span>
+    <select id="advice-model"
+            style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+                   padding:8px 12px;color:var(--text);font-size:0.88rem;outline:none;">
+      <option value="haiku" selected>Haiku（預設，速度快・約 NT$0.4/次）</option>
+      <option value="sonnet">Sonnet（分析較深入・約 NT$1/次）</option>
+    </select>
+    <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 只影響「操作建議」段落的文字品質</span>
+  </div>
 </div>
 
 <!-- ── 送出 ── -->
@@ -492,6 +502,7 @@ function save() {
   const data = {
     retireGoal: document.getElementById('retire-goal').value,
     monthlyIncome: document.getElementById('monthly-income').value,
+    adviceModel: document.getElementById('advice-model').value,
     crypto:   extractTableData('crypto-tbody'),
     'us-stock': extractTableData('us-stock-tbody'),
     'tw-stock': extractTableData('tw-stock-tbody'),
@@ -519,6 +530,7 @@ function loadSaved() {
     const data = JSON.parse(raw);
     if (data.retireGoal) document.getElementById('retire-goal').value = data.retireGoal;
     if (data.monthlyIncome) document.getElementById('monthly-income').value = data.monthlyIncome;
+    if (data.adviceModel) document.getElementById('advice-model').value = data.adviceModel;
     const tbodies = ['crypto', 'us-stock', 'tw-stock', 'jp-stock', 'bond', 'cash'];
     const defaultsList = [cryptoDefaults, usStockDefaults, twStockDefaults,
                           jpStockDefaults, bondDefaults, cashDefaults];
@@ -580,6 +592,7 @@ async function submitReport() {
         assets,
         retirement_goal_monthly_twd: goalWan * 10000,
         monthly_income_twd: incomeWan * 10000,
+        advice_model: document.getElementById('advice-model').value,
       }),
     });
 

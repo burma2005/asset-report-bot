@@ -54,10 +54,12 @@ async def run(
     assets: dict,
     retirement_goal_monthly_twd: float = 0,
     monthly_income_twd: float = 0,
+    advice_model: str = "haiku",
 ) -> str:
     prices         = await fetch_all_prices(assets)
     portfolio_data = generate_portfolio_data(
-        assets, prices, retirement_goal_monthly_twd, monthly_income_twd)
+        assets, prices, retirement_goal_monthly_twd, monthly_income_twd,
+        advice_model)
     return _build_html(portfolio_data)
 
 
@@ -86,5 +88,8 @@ def lambda_handler(event, _context):
 
     goal   = float(body.get("retirement_goal_monthly_twd") or 0)
     income = float(body.get("monthly_income_twd") or 0)
-    html = asyncio.run(run(assets, goal, income))
+    advice_model = body.get("advice_model", "haiku")
+    if advice_model not in ("haiku", "sonnet"):
+        advice_model = "haiku"
+    html = asyncio.run(run(assets, goal, income, advice_model))
     return _ok(html)
