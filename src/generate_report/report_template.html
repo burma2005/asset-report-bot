@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>資產配置報告</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink:        #0d1117;
+      --ink-light:  #444c5e;
+      --ink-muted:  #8892a4;
+      --line:       #e4e8f0;
+      --surface:    #f8f9fc;
+      --white:      #ffffff;
+      --blue:       #2563eb;
+      --blue-light: #eff4ff;
+      --teal:       #0d9488;
+      --purple:     #7c3aed;
+      --amber:      #d97706;
+      --rose:       #e11d48;
+      --green:      #16a34a;
+      --green-light:#f0fdf4;
+      --radius-sm:  6px;
+      --radius:     12px;
+      --radius-lg:  18px;
+    }
+
+    body {
+      font-family: -apple-system, 'Segoe UI', 'PingFang TC', 'Microsoft JhengHei', 'Noto Sans TC', sans-serif;
+      background: var(--surface);
+      color: var(--ink);
+      line-height: 1.5;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+
+    /* ── Page wrapper ── */
+    .page {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 40px 24px 60px;
+    }
+
+    /* ── Cover header ── */
+    .cover {
+      background: linear-gradient(135deg, #1e3a5f 0%, #0f2847 60%, #162238 100%);
+      border-radius: var(--radius-lg);
+      padding: 40px 48px;
+      margin-bottom: 28px;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      position: relative;
+      overflow: hidden;
+    }
+    .cover::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at 80% 20%, rgba(99,179,255,0.12) 0%, transparent 60%);
+    }
+    .cover-left { position: relative; }
+    .cover-label {
+      font-size: 0.7rem; font-weight: 700; letter-spacing: 0.16em;
+      text-transform: uppercase; color: rgba(255,255,255,0.5);
+      margin-bottom: 10px;
+    }
+    .cover-title {
+      font-size: 2rem; font-weight: 800; line-height: 1.15;
+      letter-spacing: -0.02em;
+    }
+    .cover-title em { color: #63b3ff; font-style: normal; }
+    .cover-sub { margin-top: 8px; font-size: 0.82rem; color: rgba(255,255,255,0.5); }
+    .cover-right { position: relative; text-align: right; }
+    .cover-total-label { font-size: 0.72rem; color: rgba(255,255,255,0.5); margin-bottom: 4px; }
+    .cover-total {
+      font-size: 2.4rem; font-weight: 900; letter-spacing: -0.03em;
+      color: #fff; line-height: 1;
+    }
+    .cover-total sub { font-size: 1rem; font-weight: 600; vertical-align: middle;
+                        margin-right: 4px; color: rgba(255,255,255,0.7); }
+    .cover-date { margin-top: 6px; font-size: 0.75rem; color: rgba(255,255,255,0.4); }
+
+    /* ── Section title ── */
+    .section-title {
+      font-size: 0.7rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--ink-muted);
+      margin: 28px 0 12px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .section-title::after {
+      content: ''; flex: 1; height: 1px; background: var(--line);
+    }
+
+    /* ── KPI strip ── */
+    .kpi-strip {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+      margin-bottom: 4px;
+    }
+    .kpi {
+      background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 18px 20px;
+    }
+    .kpi-label { font-size: 0.72rem; color: var(--ink-muted); font-weight: 600;
+                  text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 8px; }
+    .kpi-value { font-size: 1.55rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+    .kpi-sub   { font-size: 0.75rem; color: var(--ink-muted); margin-top: 5px; }
+    .kpi-chip  {
+      display: inline-flex; align-items: center; gap: 4px;
+      margin-top: 8px; padding: 3px 10px; border-radius: 20px;
+      font-size: 0.7rem; font-weight: 700;
+    }
+    .chip-blue   { background: var(--blue-light); color: var(--blue); }
+    .chip-green  { background: var(--green-light); color: var(--green); }
+    .chip-amber  { background: #fffbeb; color: var(--amber); }
+
+    /* ── Allocation chart card (dark, full-width) ── */
+    .alloc-card {
+      background: #12172b;
+      border-radius: var(--radius-lg);
+      padding: 28px 32px;
+      margin-bottom: 4px;
+      color: #e8eaf0;
+    }
+    .alloc-header { margin-bottom: 6px; }
+    .alloc-title  { font-size: 1.25rem; font-weight: 800; color: #fff; }
+    .alloc-total  { font-size: 0.82rem; color: #7b82a0; margin-top: 4px; }
+    .alloc-total span { color: #63b3ff; font-weight: 600; }
+    .alloc-body   { display: grid; grid-template-columns: 280px 1fr; gap: 32px; align-items: center; margin-top: 20px; }
+    .alloc-chart-wrap { position: relative; width: 240px; height: 240px; flex-shrink: 0; }
+
+    /* Numbered legend */
+    .alloc-legend { display: flex; flex-direction: column; gap: 10px; }
+    .alloc-legend-item {
+      display: grid;
+      grid-template-columns: 22px 14px 1fr auto;
+      align-items: start;
+      gap: 0 10px;
+    }
+    .alloc-num   { font-size: 0.78rem; color: #7b82a0; font-weight: 700; padding-top: 2px; }
+    .alloc-dot   { width: 14px; height: 14px; border-radius: 4px; flex-shrink: 0; margin-top: 3px; }
+    .alloc-info  { }
+    .alloc-name  { font-size: 0.85rem; font-weight: 600; color: #e8eaf0; line-height: 1.2; }
+    .alloc-sub   { font-size: 0.72rem; color: #4fc3f7; margin-top: 2px; }
+    .alloc-pct   { font-size: 0.95rem; font-weight: 800; color: #63b3ff;
+                    text-align: right; padding-top: 1px; white-space: nowrap; }
+
+    /* Category chart (smaller, right side) */
+    .charts-row {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 4px;
+    }
+    .chart-card {
+      background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 22px;
+    }
+    .chart-card-title { font-size: 0.72rem; font-weight: 700; color: var(--ink-muted);
+                         text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 16px; }
+    .chart-wrap { position: relative; height: 180px; }
+    .chart-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 14px; }
+    .legend-item { display: flex; align-items: center; gap: 6px; font-size: 0.76rem; color: var(--ink-light); }
+    .legend-dot  { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+    @media (max-width: 640px) {
+      .alloc-body { grid-template-columns: 1fr; }
+      .alloc-chart-wrap { width: 200px; height: 200px; margin: 0 auto; }
+    }
+
+    /* ── Asset table ── */
+    .table-card {
+      background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); overflow: hidden;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
+    thead { background: var(--surface); }
+    thead th {
+      padding: 11px 16px; text-align: left;
+      font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--ink-muted);
+      border-bottom: 1px solid var(--line);
+    }
+    thead th.right { text-align: right; }
+    tbody tr { border-bottom: 1px solid var(--line); transition: background 0.1s; }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--surface); }
+    td { padding: 12px 16px; vertical-align: middle; }
+    td.right { text-align: right; font-variant-numeric: tabular-nums; }
+
+    .sym-cell { display: flex; align-items: center; gap: 10px; }
+    .sym-icon {
+      width: 34px; height: 34px; border-radius: 8px;
+      background: var(--surface); border: 1px solid var(--line);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 0.65rem; font-weight: 800; color: var(--blue);
+      letter-spacing: -0.02em; flex-shrink: 0; overflow: hidden;
+    }
+    .sym-name { font-weight: 700; font-size: 0.85rem; }
+    .sym-full { font-size: 0.73rem; color: var(--ink-muted); margin-top: 1px; }
+
+    .cat-badge {
+      display: inline-flex; align-items: center;
+      padding: 3px 9px; border-radius: 20px;
+      font-size: 0.68rem; font-weight: 700; white-space: nowrap;
+    }
+    .cat-crypto { background: #eff6ff; color: #1d4ed8; }
+    .cat-tw     { background: #f0fdf4; color: #15803d; }
+    .cat-us     { background: #fffbeb; color: #b45309; }
+    .cat-jp     { background: #fff1f2; color: #be123c; }
+    .cat-bond   { background: #faf5ff; color: #6d28d9; }
+    .cat-cash   { background: #f8fafc; color: #64748b; }
+
+    .bar-cell  { display: flex; align-items: center; gap: 8px; }
+    .bar-track {
+      flex: 1; height: 5px; border-radius: 99px;
+      background: var(--line); overflow: hidden; min-width: 48px;
+    }
+    .bar-fill  { height: 100%; border-radius: 99px; background: var(--blue); }
+    .bar-pct   { font-size: 0.76rem; color: var(--ink-muted); min-width: 36px; text-align: right;
+                  font-variant-numeric: tabular-nums; }
+
+    /* ── Retirement card ── */
+    .retire-card {
+      background: linear-gradient(135deg, #0f2847 0%, #1a3a60 100%);
+      border-radius: var(--radius); padding: 28px 32px; color: #fff;
+    }
+    .retire-card .section-title { color: rgba(255,255,255,0.5); }
+    .retire-card .section-title::after { background: rgba(255,255,255,0.15); }
+    .retire-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; }
+    .retire-num   { font-size: 2.1rem; font-weight: 900; letter-spacing: -0.03em; color: #63b3ff; }
+    .retire-label { font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-top: 4px; }
+    .retire-rule  { font-size: 0.7rem; color: rgba(255,255,255,0.3); margin-top: 2px; }
+    .retire-note  {
+      background: rgba(255,255,255,0.08); border-radius: 8px;
+      padding: 14px 18px; font-size: 0.83rem; line-height: 1.65;
+      color: rgba(255,255,255,0.75); border-left: 3px solid #63b3ff;
+    }
+
+    /* ── Alerts ── */
+    .alert-card {
+      display: flex; gap: 12px; align-items: flex-start;
+      border-radius: var(--radius); padding: 14px 18px; margin-bottom: 10px;
+      border: 1px solid;
+    }
+    .alert-danger  { background: #fff1f2; border-color: #fda4af; }
+    .alert-warning { background: #fffbeb; border-color: #fcd34d; }
+    .alert-ok      { background: #f0fdf4; border-color: #86efac; }
+    .alert-icon  { font-size: 1.2rem; line-height: 1.3; }
+    .alert-title { font-weight: 800; font-size: 0.9rem; }
+    .alert-danger  .alert-title { color: #be123c; }
+    .alert-warning .alert-title { color: #b45309; }
+    .alert-ok      .alert-title { color: #15803d; }
+    .alert-detail { font-size: 0.8rem; color: var(--ink-light); margin-top: 2px; }
+
+    /* ── Retirement progress bar ── */
+    .rp-wrap   { margin: 4px 0 20px; }
+    .rp-labels { display: flex; justify-content: space-between;
+                  font-size: 0.78rem; color: rgba(255,255,255,0.6); margin-bottom: 8px; }
+    .rp-labels strong { color: #63b3ff; font-size: 0.92rem; }
+    .rp-track  {
+      height: 14px; border-radius: 99px; background: rgba(255,255,255,0.12);
+      overflow: hidden; position: relative;
+    }
+    .rp-fill   {
+      height: 100%; border-radius: 99px;
+      background: linear-gradient(90deg, #2563eb, #63b3ff);
+      transition: width 0.6s;
+    }
+    .rp-target { font-size: 0.72rem; color: rgba(255,255,255,0.4); margin-top: 6px; }
+
+    /* ── Inline meme（嵌入段落，台詞呼應內容）── */
+    .meme-inline {
+      display: flex; gap: 16px; align-items: center;
+      background: var(--white); border: 1px dashed var(--line);
+      border-radius: var(--radius); padding: 14px 18px; margin: 10px 0;
+    }
+    .meme-inline img {
+      width: 150px; border-radius: 8px; flex-shrink: 0;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .meme-inline .meme-quote { font-size: 1rem; font-weight: 800; color: var(--ink); }
+    .meme-inline .meme-ctx   { font-size: 0.78rem; color: var(--ink-muted); margin-top: 4px; }
+    .retire-card .meme-inline { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); }
+    .retire-card .meme-quote  { color: #fff; }
+    .retire-card .meme-ctx    { color: rgba(255,255,255,0.55); }
+
+    /* ── Recommendations ── */
+    .rec-card {
+      display: flex; gap: 12px; align-items: flex-start;
+      background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 13px 16px; margin-bottom: 8px;
+    }
+    .rec-action {
+      flex-shrink: 0; padding: 4px 12px; border-radius: 20px;
+      font-size: 0.78rem; font-weight: 800; white-space: nowrap;
+    }
+    .rec-加碼   { background: #f0fdf4; color: #15803d; }
+    .rec-減碼   { background: #fff1f2; color: #be123c; }
+    .rec-不動   { background: #f8fafc; color: #64748b; }
+    .rec-觀察   { background: #fffbeb; color: #b45309; }
+    .rec-再平衡 { background: #eff6ff; color: #1d4ed8; }
+    .rec-target { font-weight: 700; font-size: 0.88rem; }
+    .rec-reason { font-size: 0.8rem; color: var(--ink-muted); margin-top: 2px; }
+
+    /* ── News ── */
+    .news-card {
+      display: block; background: var(--white); border: 1px solid var(--line);
+      border-radius: var(--radius); padding: 14px 18px; margin-bottom: 8px;
+      text-decoration: none; transition: border-color 0.15s;
+    }
+    .news-card:hover { border-color: var(--blue); }
+    .news-title  { font-size: 0.88rem; font-weight: 700; color: var(--ink); }
+    .news-meta   { font-size: 0.73rem; color: var(--ink-muted); margin-top: 4px; }
+    .news-tag    {
+      display: inline-block; padding: 2px 8px; border-radius: 20px;
+      background: var(--blue-light); color: var(--blue);
+      font-size: 0.68rem; font-weight: 700; margin-right: 8px;
+    }
+
+    /* ── Footer ── */
+    .footer {
+      margin-top: 32px; padding-top: 20px; border-top: 1px solid var(--line);
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 0.72rem; color: var(--ink-muted);
+    }
+    .footer-sources { display: flex; gap: 16px; }
+    .src-tag {
+      padding: 3px 10px; border-radius: 20px; background: var(--surface);
+      border: 1px solid var(--line); font-size: 0.68rem; font-weight: 600;
+    }
+
+    @media (max-width: 640px) {
+      .cover { flex-direction: column; gap: 24px; padding: 28px 24px; }
+      .cover-right { text-align: left; }
+      .kpi-strip { grid-template-columns: 1fr; }
+      .charts-row { grid-template-columns: 1fr; }
+      .retire-grid { grid-template-columns: 1fr; }
+    }
+
+    @media print {
+      body { background: #fff; }
+      .page { padding: 20px; }
+      .cover { -webkit-print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Cover -->
+  <div class="cover">
+    <div class="cover-left">
+      <div class="cover-label">Personal Finance</div>
+      <div class="cover-title">資產配置<br><em>分析報告</em></div>
+      <div class="cover-sub" id="cover-sub">即時報價 · 自動換算新台幣</div>
+    </div>
+    <div class="cover-right">
+      <div class="cover-total-label">總資產（新台幣）</div>
+      <div class="cover-total"><sub>NT$</sub><span id="cover-total">—</span></div>
+      <div class="cover-date" id="cover-date">—</div>
+    </div>
+  </div>
+
+  <!-- KPI -->
+  <div class="section-title">資產概況</div>
+  <div class="kpi-strip" id="kpi-strip"></div>
+
+  <!-- Allocation chart (dark full-width) -->
+  <div class="section-title">配置分析</div>
+  <div class="alloc-card">
+    <div class="alloc-header">
+      <div class="alloc-title">資產配置比例圖</div>
+      <div class="alloc-total">精算總市值：<span id="alloc-total-val">—</span> TWD</div>
+    </div>
+    <div class="alloc-body">
+      <div class="alloc-chart-wrap"><canvas id="chart-assets"></canvas></div>
+      <div class="alloc-legend" id="alloc-legend"></div>
+    </div>
+  </div>
+
+  <!-- Category charts (compact) -->
+  <div class="charts-row" style="margin-top:12px;">
+    <div class="chart-card">
+      <div class="chart-card-title">子類別配置（鏈上/鏈下現金・加密・台日美股・債券）</div>
+      <div class="chart-wrap"><canvas id="chart-cats"></canvas></div>
+      <div class="chart-legend" id="legend-cats"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-card-title">四大部位（現金・加密・股票・債券）</div>
+      <div class="chart-wrap"><canvas id="chart-groups"></canvas></div>
+      <div class="chart-legend" id="legend-groups"></div>
+    </div>
+  </div>
+
+  <!-- Allocation meme slot -->
+  <div id="meme-allocation"></div>
+
+  <!-- Alerts -->
+  <div class="section-title" style="margin-top:28px;">風險示警</div>
+  <div id="alerts-area"></div>
+  <div id="meme-alerts"></div>
+
+  <!-- News -->
+  <div class="section-title" style="margin-top:28px;">持倉相關新聞</div>
+  <div id="news-area"></div>
+
+  <!-- Recommendations -->
+  <div class="section-title" style="margin-top:28px;">操作建議</div>
+  <div id="rec-area"></div>
+
+  <!-- Table -->
+  <div class="section-title">資產明細</div>
+  <div class="table-card">
+    <table>
+      <thead>
+        <tr>
+          <th>資產</th>
+          <th>類別</th>
+          <th class="right">持有數量</th>
+          <th class="right">最新報價（原幣）</th>
+          <th>來源</th>
+          <th class="right">市值（TWD）</th>
+          <th style="min-width:120px">佔比</th>
+        </tr>
+      </thead>
+      <tbody id="asset-tbody"></tbody>
+    </table>
+  </div>
+
+  <!-- Retirement -->
+  <div class="section-title" style="margin-top:28px;">退休試算</div>
+  <div class="retire-card">
+    <div class="retire-grid" id="retire-grid"></div>
+    <div id="retire-progress-area"></div>
+    <div id="meme-retirement"></div>
+    <div class="retire-note" id="retire-note">—</div>
+  </div>
+
+  <!-- Spending plan -->
+  <div id="spending-section" style="display:none">
+    <div class="section-title" style="margin-top:28px;">花費規劃</div>
+    <div class="charts-row">
+      <div class="chart-card">
+        <div class="chart-card-title">你的月花費 vs 台灣官方基準</div>
+        <div id="bench-bars"></div>
+        <div style="font-size:0.68rem;color:var(--ink-muted);margin-top:10px">資料來源：行政院主計總處</div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-title">建議支出分配</div>
+        <div id="breakdown-area"></div>
+      </div>
+    </div>
+    <div id="spending-tips"></div>
+  </div>
+
+  <!-- Drawdown simulation -->
+  <div id="drawdown-section" style="display:none">
+    <div class="section-title" style="margin-top:28px;">資產耐久試算（通膨調整提領）</div>
+    <div class="kpi-strip" id="drawdown-scenarios"></div>
+    <div class="table-card" style="margin-top:12px">
+      <div style="padding:12px 16px;font-size:0.72rem;color:var(--ink-muted);border-bottom:1px solid var(--line)" id="drawdown-caption"></div>
+      <div style="max-height:420px;overflow-y:auto">
+        <table>
+          <thead>
+            <tr>
+              <th>年度</th>
+              <th class="right">年提領（通膨+2%/年）</th>
+              <th class="right">年初資產</th>
+              <th class="right">年末資產</th>
+              <th style="min-width:110px">剩餘</th>
+            </tr>
+          </thead>
+          <tbody id="drawdown-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div class="footer-sources">
+      <span class="src-tag">Binance API</span>
+      <span class="src-tag">Yahoo Finance</span>
+      <span class="src-tag">Frankfurter（歐洲央行匯率）</span>
+    </div>
+    <span id="footer-ts">—</span>
+  </div>
+
+</div><!-- /page -->
+
+<script>
+// ── Data injected by Lambda ──
+const D = __PORTFOLIO_DATA__;
+
+// ── Palette ──
+const PALETTE = [
+  '#2563eb','#7c3aed','#0d9488','#d97706','#e11d48',
+  '#0891b2','#65a30d','#9333ea','#f59e0b','#06b6d4',
+  '#84cc16','#ec4899',
+];
+
+const CAT_COLOR = {
+  '鏈上現金': '#0891b2', '鏈下現金': '#8892a4',
+  '加密部位': '#2563eb', '加密貨幣': '#2563eb',
+  '台股': '#16a34a', '美股': '#d97706', '日股': '#e11d48', '港股': '#9333ea',
+  '債券': '#7c3aed', '美債': '#7c3aed',
+  '現金部位': '#8892a4', '股票部位': '#16a34a', '債券部位': '#7c3aed',
+};
+const CAT_CLASS = {
+  '鏈上現金': 'cat-crypto', '鏈下現金': 'cat-cash',
+  '加密部位': 'cat-crypto', '加密貨幣': 'cat-crypto',
+  '台股': 'cat-tw', '美股': 'cat-us', '日股': 'cat-jp',
+  '債券': 'cat-bond', '美債': 'cat-bond', '現金': 'cat-cash',
+};
+
+// ── Formatters ──
+const fmtInt  = n => Math.round(n).toLocaleString('zh-TW');
+const fmtDec  = (n, d=2) => Number(n).toLocaleString('zh-TW', {minimumFractionDigits:d, maximumFractionDigits:d});
+const fmtPct  = n => fmtDec(n, 1) + '%';
+
+// ── Cover ──
+document.getElementById('cover-total').textContent = fmtInt(D.total_twd);
+document.getElementById('cover-date').textContent  = D.generated_at;
+document.getElementById('footer-ts').textContent   = '資料更新：' + D.generated_at;
+
+// ── KPI strip (categories) ──
+const kpiEl = document.getElementById('kpi-strip');
+kpiEl.innerHTML = D.categories.map(c => {
+  const chip = c.pct > 45 ? 'chip-amber' : c.pct > 25 ? 'chip-blue' : 'chip-green';
+  return `<div class="kpi">
+    <div class="kpi-label">${c.name}</div>
+    <div class="kpi-value">NT$&nbsp;${fmtInt(c.value_twd)}</div>
+    <div class="kpi-sub">佔總資產</div>
+    <span class="kpi-chip ${chip}">${fmtPct(c.pct)}</span>
+  </div>`;
+}).join('');
+
+// ── 主配置圓餅圖（深色卡片風格，對齊截圖）──
+document.getElementById('alloc-total-val').textContent = '$' + fmtInt(D.total_twd);
+
+const allocCtx = document.getElementById('chart-assets').getContext('2d');
+new Chart(allocCtx, {
+  type: 'doughnut',
+  data: {
+    labels: D.assets.map(a => a.symbol),
+    datasets: [{
+      data: D.assets.map(a => a.value_twd),
+      backgroundColor: PALETTE.slice(0, D.assets.length),
+      borderColor: '#12172b',
+      borderWidth: 3,
+      hoverOffset: 8,
+    }]
+  },
+  options: {
+    responsive: true,
+    maintainAspectRatio: false,
+    cutout: '70%',
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label: ctx => ` NT$${fmtInt(ctx.raw)}  (${fmtPct(ctx.raw / D.total_twd * 100)})`
+        },
+        backgroundColor: '#1e3a5f',
+        titleColor: '#fff',
+        bodyColor: 'rgba(255,255,255,0.85)',
+        padding: 12,
+        cornerRadius: 8,
+      }
+    }
+  }
+});
+
+// 右側編號圖例（含持有數量、最新報價、市值、備註）
+const legendEl = document.getElementById('alloc-legend');
+legendEl.innerHTML = D.assets.map((a, i) => {
+  const color = PALETTE[i % PALETTE.length];
+  const note  = a.note ? `（${a.note}）` : '';
+
+  // 持有數量 × 最新報價（原幣）
+  let holdLine = '';
+  if (a.amount != null && a.price_native != null) {
+    const qtyStr = `${fmtDec(a.amount, a.amount < 1 ? 4 : 0)} ${a.unit || ''}`.trim();
+    const pd     = a.price_native < 1 ? 4 : a.price_native < 100 ? 2 : 0;
+    holdLine = `${qtyStr} × ${fmtDec(a.price_native, pd)} ${a.currency || ''}`;
+    if (a.source && a.source !== '—') holdLine += `｜${a.source}`;
+  }
+
+  return `
+  <div class="alloc-legend-item">
+    <div class="alloc-num">${i + 1}.</div>
+    <div class="alloc-dot" style="background:${color}"></div>
+    <div class="alloc-info">
+      <div class="alloc-name">${a.name || a.symbol} <span style="color:#7b82a0;font-weight:400">(${a.symbol})</span></div>
+      ${holdLine ? `<div class="alloc-sub" style="color:#9aa3b8">${holdLine}</div>` : ''}
+      <div class="alloc-sub">約 $${fmtInt(a.value_twd)} TWD${note ? ' ' + note : ''}</div>
+    </div>
+    <div class="alloc-pct">${fmtPct(a.pct)}</div>
+  </div>`;
+}).join('');
+
+// ── 輔助小圖：大類別 / 加密 vs 傳統 ──
+function drawSmallDoughnut(canvasId, legendId, labels, values, colors, total) {
+  const ctx = document.getElementById(canvasId).getContext('2d');
+  new Chart(ctx, {
+    type: 'doughnut',
+    data: { labels, datasets: [{ data: values, backgroundColor: colors,
+              borderColor: '#fff', borderWidth: 2, hoverOffset: 4 }] },
+    options: {
+      responsive: true, maintainAspectRatio: false, cutout: '65%',
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => ` NT$${fmtInt(c.raw)} (${fmtPct(c.raw / total * 100)})` },
+          backgroundColor: '#1e3a5f', titleColor: '#fff',
+          bodyColor: 'rgba(255,255,255,0.8)', padding: 8, cornerRadius: 6 }
+      }
+    }
+  });
+  document.getElementById(legendId).innerHTML = labels.map((l, i) => `
+    <div class="legend-item">
+      <div class="legend-dot" style="background:${colors[i]}"></div>
+      <span>${l} ${fmtPct(values[i] / total * 100)}</span>
+    </div>`).join('');
+}
+
+const catColors = D.categories.map(c => CAT_COLOR[c.name] || '#8892a4');
+drawSmallDoughnut('chart-cats', 'legend-cats',
+  D.categories.map(c => c.name), D.categories.map(c => c.value_twd), catColors, D.total_twd);
+
+// 四大部位（現金/加密/股票/債券）
+const groups = D.groups || [];
+drawSmallDoughnut('chart-groups', 'legend-groups',
+  groups.map(g => g.name), groups.map(g => g.value_twd),
+  groups.map(g => CAT_COLOR[g.name] || '#8892a4'), D.total_twd);
+
+// ── 風險示警 ──
+const alertsEl = document.getElementById('alerts-area');
+const alerts = D.alerts || [];
+if (alerts.length === 0) {
+  alertsEl.innerHTML = `
+    <div class="alert-card alert-ok">
+      <div class="alert-icon">✅</div>
+      <div>
+        <div class="alert-title">未偵測到異常</div>
+        <div class="alert-detail">穩定幣未脫鉤、各資產無異常波動（依官方 API 即時數據判定）</div>
+      </div>
+    </div>`;
+} else {
+  alertsEl.innerHTML = alerts.map(a => `
+    <div class="alert-card alert-${a.level}">
+      <div class="alert-icon">${a.level === 'danger' ? '🚨' : '⚠️'}</div>
+      <div>
+        <div class="alert-title">${a.title}</div>
+        <div class="alert-detail">${a.detail}</div>
+      </div>
+    </div>`).join('');
+}
+
+// ── Asset table ──
+const maxVal = Math.max(...D.assets.map(a => a.value_twd));
+const tbody  = document.getElementById('asset-tbody');
+
+tbody.innerHTML = D.assets.map((a, i) => {
+  const catCls  = CAT_CLASS[a.category] || 'cat-cash';
+  const barW    = (a.value_twd / maxVal * 100).toFixed(1);
+  const abbr    = a.symbol.replace(/\.(TW|TWO|T|HK|L)$/i, '').slice(0, 4);
+  const color   = PALETTE[i % PALETTE.length];
+  const qtyStr  = a.amount != null
+    ? `${fmtDec(a.amount, a.amount < 1 ? 4 : 0)} ${a.unit || ''}`
+    : '—';
+  // 最新報價：原幣顯示（如 535.20 USD / 99.85 TWD / 410 JPY）
+  let priceStr = '—';
+  if (a.price_native != null) {
+    const decimals = a.price_native < 1 ? 4 : a.price_native < 100 ? 2 : 0;
+    priceStr = `${fmtDec(a.price_native, decimals)} <span style="color:var(--ink-muted);font-size:0.72rem">${a.currency || ''}</span>`;
+    // TWD 換算輔助（原幣非台幣時，小字顯示）
+    if (a.currency !== 'TWD' && a.price_twd != null) {
+      priceStr += `<div style="font-size:0.7rem;color:var(--ink-muted)">≈ NT$ ${fmtDec(a.price_twd, a.price_twd < 100 ? 2 : 0)}</div>`;
+    }
+  }
+  const srcStr = a.source && a.source !== '—'
+    ? `<span class="src-tag" style="font-size:0.65rem">${a.source}</span>`
+    : '<span style="color:var(--ink-muted)">—</span>';
+
+  return `<tr>
+    <td>
+      <div class="sym-cell">
+        <div class="sym-icon" style="border-color:${color}20;color:${color}">${abbr}</div>
+        <div>
+          <div class="sym-name">${a.symbol}</div>
+          <div class="sym-full">${a.name || ''}</div>
+        </div>
+      </div>
+    </td>
+    <td><span class="cat-badge ${catCls}">${a.category}</span></td>
+    <td class="right">${qtyStr}</td>
+    <td class="right">${priceStr}</td>
+    <td>${srcStr}</td>
+    <td class="right"><strong>NT$&nbsp;${fmtInt(a.value_twd)}</strong></td>
+    <td>
+      <div class="bar-cell">
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${barW}%;background:${color}"></div>
+        </div>
+        <span class="bar-pct">${fmtPct(a.pct)}</span>
+      </div>
+    </td>
+  </tr>`;
+}).join('');
+
+// ── Retirement ──
+const r = D.retirement;
+document.getElementById('retire-grid').innerHTML = `
+  <div>
+    <div class="retire-num">NT$&nbsp;${fmtInt(r.annual_4pct_twd)}</div>
+    <div class="retire-label">年度可提領金額</div>
+    <div class="retire-rule">4% Safe Withdrawal Rate</div>
+  </div>
+  <div>
+    <div class="retire-num">NT$&nbsp;${fmtInt(r.monthly_4pct_twd)}</div>
+    <div class="retire-label">每月可提領金額</div>
+    <div class="retire-rule">= 年度 ÷ 12</div>
+  </div>`;
+document.getElementById('retire-note').textContent = r.notes || '';
+
+// 退休目標進度條（有填目標才顯示）
+if (r.progress_pct != null) {
+  const pct = Math.min(100, r.progress_pct);
+  document.getElementById('retire-progress-area').innerHTML = `
+    <div class="rp-wrap">
+      <div class="rp-labels">
+        <span>退休目標達成進度（目標：每月 NT$ ${fmtInt(r.goal_monthly_twd)} 生活費）</span>
+        <strong>${fmtDec(r.progress_pct, 1)}%</strong>
+      </div>
+      <div class="rp-track"><div class="rp-fill" style="width:${pct}%"></div></div>
+      <div class="rp-target">依 4% 法則所需總資產：NT$ ${fmtInt(r.target_total_twd)}（= 月生活費 × 300）｜尚差 NT$ ${fmtInt(Math.max(0, r.target_total_twd - D.total_twd))}</div>
+    </div>`;
+}
+
+// ── 插槽式梗圖（台詞呼應段落內容）──
+const SLOT_EL = {
+  alerts:     'meme-alerts',
+  allocation: 'meme-allocation',
+  retirement: 'meme-retirement',
+};
+(D.memes || []).forEach(m => {
+  if (!m.data_uri) return;
+  const el = document.getElementById(SLOT_EL[m.slot] || 'meme-alerts');
+  if (!el) return;
+  el.innerHTML += `
+    <div class="meme-inline">
+      <img src="${m.data_uri}" alt="${m.mood}" />
+      <div>
+        <div class="meme-quote">「${m.caption}」</div>
+        <div class="meme-ctx">${m.context || ''}</div>
+      </div>
+    </div>`;
+});
+
+// ── 操作建議 ──
+const recEl = document.getElementById('rec-area');
+const recs = D.recommendations || [];
+recEl.innerHTML = recs.length === 0
+  ? '<div class="rec-card"><span class="rec-action rec-不動">不動</span><div><div class="rec-target">維持現有配置</div><div class="rec-reason">未產生具體建議</div></div></div>'
+  : recs.map(r => `
+    <div class="rec-card">
+      <span class="rec-action rec-${r.action}">${r.action}</span>
+      <div style="flex:1">
+        <div class="rec-target">${r.target}</div>
+        <div class="rec-reason">${r.reason || ''}</div>
+      </div>
+      ${r.meme && r.meme.data_uri ? `
+      <div style="flex-shrink:0;text-align:center;margin-left:8px">
+        <img src="${r.meme.data_uri}" alt="" style="width:110px;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,0.12)" />
+        <div style="font-size:0.65rem;color:var(--ink-muted);margin-top:3px">「${r.meme.caption}」</div>
+      </div>` : ''}
+    </div>`).join('');
+
+// ── 花費規劃 ──
+const sp = D.spending_plan;
+if (sp) {
+  document.getElementById('spending-section').style.display = 'block';
+
+  // 基準比較條（含用戶自己；有填收入時一併顯示）
+  const rows = [{name: `你的預計月花費（${sp.assessment}）`, amount: sp.monthly_twd, me: true}];
+  if (sp.monthly_income_twd > 0) {
+    rows.push({name: '你的目前月收入', amount: sp.monthly_income_twd, me: true});
+  }
+  rows.push(...(sp.benchmarks || []).map(b => ({name: `${b.name}（${b.year}）`, amount: b.amount, me: false})));
+  const maxAmt = Math.max(...rows.map(r => r.amount));
+  document.getElementById('bench-bars').innerHTML = rows.map(r => `
+    <div style="margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
+        <span style="color:${r.me ? 'var(--blue)' : 'var(--ink-muted)'};font-weight:${r.me ? 800 : 400}">${r.name}</span>
+        <strong style="color:${r.me ? 'var(--blue)' : 'var(--ink)'}">NT$ ${fmtInt(r.amount)}</strong>
+      </div>
+      <div style="height:8px;border-radius:99px;background:var(--line);overflow:hidden">
+        <div style="height:100%;width:${(r.amount / maxAmt * 100).toFixed(1)}%;border-radius:99px;background:${r.me ? 'var(--blue)' : '#cbd5e1'}"></div>
+      </div>
+    </div>`).join('');
+
+  // 支出分配
+  const bd = sp.breakdown || [];
+  document.getElementById('breakdown-area').innerHTML = bd.map((b, i) => `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+      <div class="legend-dot" style="background:${PALETTE[i % PALETTE.length]}"></div>
+      <span style="flex:1;font-size:0.82rem">${b.item}</span>
+      <strong style="font-size:0.82rem">NT$ ${fmtInt(b.amount)}</strong>
+      <span style="font-size:0.72rem;color:var(--ink-muted);min-width:42px;text-align:right">${fmtDec(b.amount / sp.monthly_twd * 100, 0)}%</span>
+    </div>`).join('');
+
+  // 總評與建議
+  const tips = sp.tips || [];
+  document.getElementById('spending-tips').innerHTML = `
+    <div class="alert-card ${sp.monthly_twd < 24574 ? 'alert-warning' : 'alert-ok'}">
+      <div class="alert-icon">💡</div>
+      <div>
+        <div class="alert-title">${sp.assessment}：${sp.summary || ''}</div>
+        <div class="alert-detail">${tips.map(t => '・' + t).join('<br>')}</div>
+      </div>
+    </div>`;
+}
+
+// ── 資產耐久試算 ──
+const dd = D.drawdown;
+if (dd) {
+  document.getElementById('drawdown-section').style.display = 'block';
+
+  // 三情境卡片
+  document.getElementById('drawdown-scenarios').innerHTML = dd.scenarios.map(s => {
+    const yearsStr = s.sustainable ? `${s.years}+ 年` : `${s.years} 年`;
+    const chip = s.sustainable ? 'chip-green' : s.years >= 30 ? 'chip-blue' : 'chip-amber';
+    return `<div class="kpi">
+      <div class="kpi-label">${s.label}情境（年報酬 ${s.return_pct}%）</div>
+      <div class="kpi-value">${yearsStr}</div>
+      <div class="kpi-sub">資產可支撐年數</div>
+      <span class="kpi-chip ${chip}">${s.sustainable ? '永續' : s.years >= 30 ? '充足' : '偏短'}</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('drawdown-caption').textContent =
+    `試算情境：${dd.table_scenario}｜首年提領 NT$ ${fmtInt(dd.first_year_withdrawal)}（你的月花費 ×12），之後每年依通膨 ${dd.inflation_pct}% 調升`;
+
+  const maxStart = dd.table.length ? dd.table[0].start : 1;
+  document.getElementById('drawdown-tbody').innerHTML = dd.table.map(r => {
+    const barW = Math.max(0, (r.end / maxStart * 100)).toFixed(1);
+    const depleted = r.end <= 0;
+    return `<tr ${depleted ? 'style="background:#fff1f2"' : ''}>
+      <td>第 ${r.year} 年</td>
+      <td class="right">NT$ ${fmtInt(r.withdrawal)}</td>
+      <td class="right">NT$ ${fmtInt(r.start)}</td>
+      <td class="right" ${depleted ? 'style="color:var(--rose);font-weight:800"' : ''}>${depleted ? '⚠ 耗盡' : 'NT$ ' + fmtInt(r.end)}</td>
+      <td>
+        <div class="bar-cell">
+          <div class="bar-track"><div class="bar-fill" style="width:${barW}%;background:${depleted ? 'var(--rose)' : 'var(--teal)'}"></div></div>
+        </div>
+      </td>
+    </tr>`;
+  }).join('');
+}
+
+// ── 持倉相關新聞 ──
+const newsEl = document.getElementById('news-area');
+const news = D.news || [];
+newsEl.innerHTML = news.length === 0
+  ? '<div class="news-card"><div class="news-title">暫無相關重大新聞</div><div class="news-meta">資料來源：Yahoo Finance</div></div>'
+  : news.map(n => `
+    <a class="news-card" href="${n.url}" target="_blank" rel="noopener">
+      <div class="news-title">${n.title_zh}</div>
+      <div class="news-meta"><span class="news-tag">${n.related || '總經'}</span>${n.source || ''}</div>
+    </a>`).join('');
+</script>
+</body>
+</html>

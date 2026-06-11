@@ -1,0 +1,11 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "asset-report-bot"
+region = "ap-northeast-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+# 產生方式（PowerShell）：
+#   $rng=[System.Security.Cryptography.RNGCryptoServiceProvider]::new();$b=New-Object byte[] 32;$rng.GetBytes($b);([Convert]::ToBase64String($b) -replace '[+/=]','').Substring(0,40)
+parameter_overrides = "ApiKeyParam=<你的40字元隨機金鑰>"

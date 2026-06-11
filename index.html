@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>資產管理 — 報告產生器</title>
+  <style>
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #22263a;
+      --border: #2e3250; --text: #e8eaf0; --text-muted: #7b82a0;
+      --accent: #5b8ef0; --green: #34c78a; --red: #f05b5b;
+      --yellow: #f0c55b; --radius: 10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;
+           background: var(--bg); color: var(--text); min-height: 100vh; padding: 24px; }
+
+    /* ── Header ── */
+    .header { text-align: center; margin-bottom: 32px; }
+    .header h1 { font-size: 1.6rem; font-weight: 800; }
+    .header h1 span { color: var(--accent); }
+    .header p { color: var(--text-muted); margin-top: 6px; font-size: 0.88rem; }
+
+    /* ── Category tabs ── */
+    .tabs { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+    .tab-btn {
+      padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border);
+      background: var(--surface); color: var(--text-muted);
+      cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.15s;
+    }
+    .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .tab-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Section card ── */
+    .section { display: none; }
+    .section.active { display: block; }
+    .card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 20px; margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 16px;
+    }
+
+    /* ── Table input ── */
+    .asset-table { width: 100%; border-collapse: collapse; }
+    .asset-table th {
+      text-align: left; padding: 8px 10px;
+      font-size: 0.72rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.06em; color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+    }
+    .asset-table td { padding: 6px 4px; vertical-align: middle; }
+    .asset-table input, .asset-table select {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text);
+      font-size: 0.85rem; outline: none; transition: border-color 0.15s;
+    }
+    .asset-table input:focus, .asset-table select:focus { border-color: var(--accent); }
+    .asset-table input[type="number"] { text-align: right; }
+    .asset-table input::placeholder { color: var(--text-muted); }
+    .del-btn {
+      background: none; border: none; color: var(--red); cursor: pointer;
+      font-size: 1.1rem; padding: 4px 8px; opacity: 0.6; transition: opacity 0.15s;
+    }
+    .del-btn:hover { opacity: 1; }
+
+    /* ── Add row button ── */
+    .add-row-btn {
+      margin-top: 10px; padding: 7px 16px; background: none;
+      border: 1px dashed var(--border); border-radius: 6px;
+      color: var(--text-muted); cursor: pointer; font-size: 0.82rem;
+      transition: all 0.15s;
+    }
+    .add-row-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+    /* ── Bond extra fields ── */
+    .bond-extras { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-top: 6px; }
+    .field-group label { font-size: 0.72rem; color: var(--text-muted); margin-bottom: 4px; display: block; }
+    .field-group input {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 10px; color: var(--text); font-size: 0.85rem; outline: none;
+    }
+    .field-group input:focus { border-color: var(--accent); }
+
+    /* ── API endpoint input ── */
+    .endpoint-bar {
+      display: flex; gap: 8px; align-items: center; margin-bottom: 20px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 16px;
+    }
+    .endpoint-bar label { font-size: 0.78rem; color: var(--text-muted); white-space: nowrap; }
+    .endpoint-bar input {
+      flex: 1; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 7px 12px; color: var(--text); font-size: 0.82rem; outline: none;
+    }
+    .endpoint-bar input:focus { border-color: var(--accent); }
+    .endpoint-bar input::placeholder { color: var(--text-muted); }
+
+    /* ── Submit button ── */
+    .submit-wrap { text-align: center; margin-top: 24px; }
+    .submit-btn {
+      padding: 14px 48px; background: var(--accent); color: #fff;
+      border: none; border-radius: var(--radius); font-size: 1rem;
+      font-weight: 700; cursor: pointer; transition: opacity 0.15s;
+      letter-spacing: 0.02em;
+    }
+    .submit-btn:hover { opacity: 0.85; }
+    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .status-msg { margin-top: 12px; font-size: 0.85rem; color: var(--text-muted); min-height: 1.4em; }
+    .status-msg.error { color: var(--red); }
+    .status-msg.success { color: var(--green); }
+
+    /* ── Toast ── */
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); padding: 12px 20px;
+      font-size: 0.85rem; opacity: 0; transition: opacity 0.3s;
+      pointer-events: none; max-width: 320px;
+    }
+    .toast.show { opacity: 1; }
+    .toast.success { border-color: var(--green); }
+    .toast.error   { border-color: var(--red); }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>💼 資產報告 <span>產生器</span></h1>
+  <p>填入你的資產持有明細，點擊「產生報告」自動查詢即時報價並輸出 HTML 報告</p>
+</div>
+
+<!-- 端點與金鑰已內建（見下方 JS 常數），不需手動設定 -->
+
+<!-- ── Tabs ── -->
+<div class="tabs">
+  <button class="tab-btn active" data-tab="crypto">₿ 加密貨幣</button>
+  <button class="tab-btn" data-tab="us-stock">🇺🇸 美股 / ETF</button>
+  <button class="tab-btn" data-tab="tw-stock">🇹🇼 台股</button>
+  <button class="tab-btn" data-tab="jp-stock">🇯🇵 日股</button>
+  <button class="tab-btn" data-tab="bond">📄 美債</button>
+  <button class="tab-btn" data-tab="cash">💵 現金</button>
+</div>
+
+<!-- ── 加密貨幣 ── -->
+<div class="section active" id="tab-crypto">
+  <div class="card">
+    <div class="card-title">加密貨幣（Binance API 自動查價）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:35%">代號（Binance 幣別）</th>
+        <th style="width:35%">持有數量</th>
+        <th style="width:20%">備註名稱</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="crypto-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('crypto-tbody', cryptoDefaults)">＋ 新增加密貨幣</button>
+  </div>
+</div>
+
+<!-- ── 美股 / ETF ── -->
+<div class="section" id="tab-us-stock">
+  <div class="card">
+    <div class="card-title">美股 / ETF（需填入現價，單位：USD）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:25%">代號</th>
+        <th style="width:25%">持有股數</th>
+        <th style="width:25%">現價（USD）</th>
+        <th style="width:15%">備註名稱</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="us-stock-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('us-stock-tbody', usStockDefaults)">＋ 新增美股</button>
+  </div>
+</div>
+
+<!-- ── 台股 ── -->
+<div class="section" id="tab-tw-stock">
+  <div class="card">
+    <div class="card-title">台股（需填入現價，單位：TWD）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:25%">代號（含 .TW）</th>
+        <th style="width:25%">持有股數</th>
+        <th style="width:25%">現價（TWD）</th>
+        <th style="width:15%">備註名稱</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="tw-stock-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('tw-stock-tbody', twStockDefaults)">＋ 新增台股</button>
+  </div>
+</div>
+
+<!-- ── 日股 ── -->
+<div class="section" id="tab-jp-stock">
+  <div class="card">
+    <div class="card-title">日股（需填入現價，單位：JPY）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:25%">代號（含 .T）</th>
+        <th style="width:25%">持有股數</th>
+        <th style="width:25%">現價（JPY）</th>
+        <th style="width:15%">備註名稱</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="jp-stock-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('jp-stock-tbody', jpStockDefaults)">＋ 新增日股</button>
+  </div>
+</div>
+
+<!-- ── 美債 ── -->
+<div class="section" id="tab-bond">
+  <div class="card">
+    <div class="card-title">美國公債（填入參考市價；未填則以面額計算）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:18%">代號</th>
+        <th style="width:22%">面額（USD）</th>
+        <th style="width:28%">參考市價（USD，選填）</th>
+        <th style="width:22%">備註名稱</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="bond-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('bond-tbody', bondDefaults)">＋ 新增美債</button>
+  </div>
+</div>
+
+<!-- ── 現金 ── -->
+<div class="section" id="tab-cash">
+  <div class="card">
+    <div class="card-title">現金存款（匯率自動換算）</div>
+    <table class="asset-table">
+      <thead><tr>
+        <th style="width:20%">幣別</th>
+        <th style="width:35%">金額</th>
+        <th style="width:35%">備註</th>
+        <th style="width:10%"></th>
+      </tr></thead>
+      <tbody id="cash-tbody"></tbody>
+    </table>
+    <button class="add-row-btn" onclick="addRow('cash-tbody', cashDefaults)">＋ 新增現金</button>
+  </div>
+</div>
+
+<!-- ── 退休目標 ── -->
+<div class="card" style="max-width:560px;margin:24px auto 0;">
+  <div class="card-title">🏖️ 退休目標</div>
+  <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+    <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">每月需要生活費</span>
+    <input type="number" id="retire-goal" min="0" step="0.5" placeholder="例：8"
+           style="width:110px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+                  padding:8px 12px;color:var(--text);font-size:0.95rem;text-align:right;outline:none;" />
+    <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">萬 台幣</span>
+    <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 首年提領額，之後依通膨調整；反推 4% 法則所需總資產</span>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;">
+    <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">目前月收入</span>
+    <input type="number" id="monthly-income" min="0" step="0.5" placeholder="已退休填 0"
+           style="width:110px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+                  padding:8px 12px;color:var(--text);font-size:0.95rem;text-align:right;outline:none;" />
+    <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">萬 台幣</span>
+    <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 已退休請填 0，用於計算儲蓄力與花費建議</span>
+  </div>
+</div>
+
+<!-- ── 送出 ── -->
+<div class="submit-wrap">
+  <button class="submit-btn" id="submit-btn" onclick="submitReport()">📊 產生報告</button>
+  <div class="status-msg" id="status-msg"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- ── 常見資產下拉選單（datalist） ── -->
+<datalist id="dl-crypto">
+  <option value="BTC">Bitcoin</option>
+  <option value="ETH">Ethereum</option>
+  <option value="SOL">Solana</option>
+  <option value="BNB">BNB</option>
+  <option value="XRP">XRP</option>
+  <option value="DOGE">Dogecoin</option>
+  <option value="USDT">Tether（穩定幣）</option>
+  <option value="USDC">USD Coin（穩定幣）</option>
+  <option value="RWUSD">RWUSD（Binance 理財）</option>
+</datalist>
+<datalist id="dl-us">
+  <option value="VOO">Vanguard S&P 500 ETF</option>
+  <option value="SPY">SPDR S&P 500 ETF</option>
+  <option value="QQQ">Invesco 納斯達克100 ETF</option>
+  <option value="VT">Vanguard 全世界 ETF</option>
+  <option value="AAPL">Apple</option>
+  <option value="MSFT">Microsoft</option>
+  <option value="NVDA">NVIDIA</option>
+  <option value="TSLA">Tesla</option>
+</datalist>
+<datalist id="dl-tw">
+  <option value="0050.TW">元大台灣50</option>
+  <option value="0056.TW">元大高股息</option>
+  <option value="006208.TW">富邦台50</option>
+  <option value="2330.TW">台積電</option>
+  <option value="2317.TW">鴻海</option>
+  <option value="2454.TW">聯發科</option>
+</datalist>
+<datalist id="dl-jp">
+  <option value="1306.T">NF TOPIX ETF</option>
+  <option value="1321.T">NF 日經225 ETF</option>
+  <option value="7203.T">豐田汽車</option>
+  <option value="9984.T">軟銀集團</option>
+  <option value="6758.T">Sony</option>
+</datalist>
+<datalist id="dl-bond">
+  <option value="US30Y">美國30年期公債</option>
+  <option value="US10Y">美國10年期公債</option>
+  <option value="US5Y">美國5年期公債</option>
+  <option value="US2Y">美國2年期公債</option>
+</datalist>
+
+<script>
+// ════════════════════════════════════════
+// 後端設定（sam deploy 後填入你自己的值）
+// 建議：複製本檔為 index.local.html（已 gitignore）再填，避免誤 push 金鑰
+// ════════════════════════════════════════
+const LAMBDA_ENDPOINT = '__YOUR_LAMBDA_FUNCTION_URL__';   // 例：https://xxxx.lambda-url.ap-northeast-1.on.aws/
+const API_KEY = '__YOUR_API_KEY__';                        // 與 samconfig.toml 的 ApiKeyParam 相同
+
+// ════════════════════════════════════════
+// 預設空白列（placeholder 為範例，不假設使用者持有任何資產）
+// ════════════════════════════════════════
+
+const cryptoDefaults  = [ { symbol: '', amount: '', name: '' } ];
+const usStockDefaults = [ { symbol: '', shares: '', price: '', name: '' } ];
+const twStockDefaults = [ { symbol: '', shares: '', price: '', name: '' } ];
+const jpStockDefaults = [ { symbol: '', shares: '', price: '', name: '' } ];
+const bondDefaults    = [ { symbol: '', face_value: '', market_price: '', name: '' } ];
+const cashDefaults    = [
+  { currency: 'TWD', amount: '', name: '' },
+];
+
+// ════════════════════════════════════════
+// 動態新增列
+// ════════════════════════════════════════
+
+function addRow(tbodyId, defaults, data = null) {
+  const tbody = document.getElementById(tbodyId);
+  const row = document.createElement('tr');
+  const d = data || {};
+
+  if (tbodyId === 'crypto-tbody') {
+    row.innerHTML = `
+      <td><input type="text" list="dl-crypto" placeholder="例：BTC（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td><input type="number" placeholder="例：0.5" step="any" min="0" value="${d.amount||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  } else if (tbodyId === 'us-stock-tbody') {
+    row.innerHTML = `
+      <td><input type="text" list="dl-us" placeholder="例：VOO（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td><input type="number" placeholder="例：10" step="1" min="0" value="${d.shares||''}" /></td>
+      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  } else if (tbodyId === 'tw-stock-tbody') {
+    row.innerHTML = `
+      <td><input type="text" list="dl-tw" placeholder="例：0050.TW（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td><input type="number" placeholder="例：1000（一張=1000股）" step="1" min="0" value="${d.shares||''}" /></td>
+      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  } else if (tbodyId === 'jp-stock-tbody') {
+    row.innerHTML = `
+      <td><input type="text" list="dl-jp" placeholder="例：1306.T（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td><input type="number" placeholder="例：100" step="1" min="0" value="${d.shares||''}" /></td>
+      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  } else if (tbodyId === 'bond-tbody') {
+    row.innerHTML = `
+      <td><input type="text" list="dl-bond" placeholder="例：US30Y（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td><input type="number" placeholder="例：10000" step="any" min="0" value="${d.face_value||''}" /></td>
+      <td><input type="number" placeholder="選填，留空以面額計算" step="any" min="0" value="${d.market_price||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  } else if (tbodyId === 'cash-tbody') {
+    row.innerHTML = `
+      <td>
+        <select>
+          <option value="TWD" ${d.currency==='TWD'?'selected':''}>🇹🇼 TWD</option>
+          <option value="USD" ${d.currency==='USD'?'selected':''}>🇺🇸 USD</option>
+          <option value="JPY" ${d.currency==='JPY'?'selected':''}>🇯🇵 JPY</option>
+        </select>
+      </td>
+      <td><input type="number" placeholder="0" step="any" min="0" value="${d.amount||''}" /></td>
+      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
+  }
+
+  tbody.appendChild(row);
+  // 每次改動自動存 localStorage
+  row.querySelectorAll('input, select').forEach(el => el.addEventListener('change', save));
+}
+
+// ════════════════════════════════════════
+// 收集所有資產 JSON
+// ════════════════════════════════════════
+
+function collectAssets() {
+  const assets = {};
+
+  // 加密貨幣
+  document.querySelectorAll('#crypto-tbody tr').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    const sym = inputs[0].value.trim().toUpperCase();
+    if (!sym) return;
+    assets[sym] = { api: 'binance', amount: parseFloat(inputs[1].value) || 0,
+                    name: inputs[2].value || sym };
+  });
+
+  // 美股
+  document.querySelectorAll('#us-stock-tbody tr').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    const sym = inputs[0].value.trim().toUpperCase();
+    if (!sym) return;
+    assets[sym] = { api: 'yahoo', category: '美股', shares: parseFloat(inputs[1].value) || 0,
+                    price_usd: parseFloat(inputs[2].value) || null,
+                    name: inputs[3].value || sym };
+  });
+
+  // 台股
+  document.querySelectorAll('#tw-stock-tbody tr').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    let sym = inputs[0].value.trim().toUpperCase();
+    if (!sym) return;
+    if (!sym.endsWith('.TW') && !sym.endsWith('.TWO')) sym += '.TW';
+    assets[sym] = { api: 'yahoo', category: '台股', shares: parseFloat(inputs[1].value) || 0,
+                    price_twd: parseFloat(inputs[2].value) || null,
+                    name: inputs[3].value || sym };
+  });
+
+  // 日股
+  document.querySelectorAll('#jp-stock-tbody tr').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    let sym = inputs[0].value.trim().toUpperCase();
+    if (!sym) return;
+    if (!sym.endsWith('.T')) sym += '.T';
+    assets[sym] = { api: 'yahoo', category: '日股', shares: parseFloat(inputs[1].value) || 0,
+                    price_jpy: parseFloat(inputs[2].value) || null,
+                    name: inputs[3].value || sym };
+  });
+
+  // 美債（代號與面額皆有值才收集）
+  document.querySelectorAll('#bond-tbody tr').forEach(row => {
+    const inputs = row.querySelectorAll('input');
+    const sym = inputs[0].value.trim().toUpperCase();
+    const faceVal = parseFloat(inputs[1].value);
+    if (!sym || !faceVal) return;
+    const marketVal = parseFloat(inputs[2].value) || null;
+    assets[sym] = { api: 'bond', face_value_usd: faceVal,
+                    market_price_usd: marketVal,
+                    name: inputs[3].value || sym };
+  });
+
+  // 現金
+  document.querySelectorAll('#cash-tbody tr').forEach(row => {
+    const sel = row.querySelector('select');
+    const inputs = row.querySelectorAll('input');
+    const ccy = sel ? sel.value : 'TWD';
+    const sym = `${ccy}_CASH_${Date.now()}`;
+    const uniqueKey = `${ccy}_CASH`;
+    assets[uniqueKey] = { api: 'cash', currency: ccy,
+                          amount: parseFloat(inputs[0].value) || 0,
+                          name: inputs[1].value || `${ccy} 現金` };
+  });
+
+  return assets;
+}
+
+// ════════════════════════════════════════
+// LocalStorage 存取
+// ════════════════════════════════════════
+
+const LS_KEY = 'asset_mgr_data';
+const LS_ENDPOINT = 'asset_mgr_endpoint';
+
+function save() {
+  const data = {
+    retireGoal: document.getElementById('retire-goal').value,
+    monthlyIncome: document.getElementById('monthly-income').value,
+    crypto:   extractTableData('crypto-tbody'),
+    'us-stock': extractTableData('us-stock-tbody'),
+    'tw-stock': extractTableData('tw-stock-tbody'),
+    'jp-stock': extractTableData('jp-stock-tbody'),
+    bond:     extractTableData('bond-tbody'),
+    cash:     extractTableData('cash-tbody'),
+  };
+  localStorage.setItem(LS_KEY, JSON.stringify(data));
+}
+
+function extractTableData(tbodyId) {
+  const rows = [];
+  document.querySelectorAll(`#${tbodyId} tr`).forEach(row => {
+    const inputs = Array.from(row.querySelectorAll('input')).map(i => i.value);
+    const selects = Array.from(row.querySelectorAll('select')).map(s => s.value);
+    rows.push({ inputs, selects });
+  });
+  return rows;
+}
+
+function loadSaved() {
+  const raw = localStorage.getItem(LS_KEY);
+  if (!raw) { loadDefaults(); return; }
+  try {
+    const data = JSON.parse(raw);
+    if (data.retireGoal) document.getElementById('retire-goal').value = data.retireGoal;
+    if (data.monthlyIncome) document.getElementById('monthly-income').value = data.monthlyIncome;
+    const tbodies = ['crypto', 'us-stock', 'tw-stock', 'jp-stock', 'bond', 'cash'];
+    const defaultsList = [cryptoDefaults, usStockDefaults, twStockDefaults,
+                          jpStockDefaults, bondDefaults, cashDefaults];
+
+    tbodies.forEach((key, i) => {
+      const tbodyId = `${key}-tbody`;
+      const rows = data[key] || [];
+      if (rows.length === 0) {
+        defaultsList[i].forEach(d => addRow(tbodyId, defaultsList[i], d));
+        return;
+      }
+      rows.forEach(({ inputs, selects }) => {
+        addRow(tbodyId, defaultsList[i]);
+        const tbody = document.getElementById(tbodyId);
+        const lastRow = tbody.lastElementChild;
+        const inEls = lastRow.querySelectorAll('input');
+        const selEls = lastRow.querySelectorAll('select');
+        inputs.forEach((v, idx) => { if (inEls[idx]) inEls[idx].value = v; });
+        selects.forEach((v, idx) => { if (selEls[idx]) selEls[idx].value = v; });
+      });
+    });
+  } catch (e) {
+    loadDefaults();
+  }
+}
+
+function loadDefaults() {
+  cryptoDefaults.forEach(d => addRow('crypto-tbody', cryptoDefaults, d));
+  usStockDefaults.forEach(d => addRow('us-stock-tbody', usStockDefaults, d));
+  twStockDefaults.forEach(d => addRow('tw-stock-tbody', twStockDefaults, d));
+  jpStockDefaults.forEach(d => addRow('jp-stock-tbody', jpStockDefaults, d));
+  bondDefaults.forEach(d => addRow('bond-tbody', bondDefaults, d));
+  cashDefaults.forEach(d => addRow('cash-tbody', cashDefaults, d));
+}
+
+// ════════════════════════════════════════
+// 送出 → Lambda
+// ════════════════════════════════════════
+
+async function submitReport() {
+  const assets = collectAssets();
+  if (Object.keys(assets).length === 0) {
+    showStatus('請至少填入一筆資產', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('submit-btn');
+  btn.disabled = true;
+  showStatus('⏳ 正在查詢即時報價並產生報告，約需 30–60 秒…');
+  save();
+
+  try {
+    const goalWan   = parseFloat(document.getElementById('retire-goal').value) || 0;
+    const incomeWan = parseFloat(document.getElementById('monthly-income').value) || 0;
+    const resp = await fetch(LAMBDA_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+      body: JSON.stringify({
+        assets,
+        retirement_goal_monthly_twd: goalWan * 10000,
+        monthly_income_twd: incomeWan * 10000,
+      }),
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`Lambda 回傳錯誤 ${resp.status}: ${errText}`);
+    }
+
+    const contentType = resp.headers.get('Content-Type') || '';
+    let htmlContent;
+
+    if (contentType.includes('application/json')) {
+      const json = await resp.json();
+      htmlContent = json.html || json.body || '';
+    } else {
+      htmlContent = await resp.text();
+    }
+
+    // 觸發下載
+    const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `portfolio_report_${new Date().toISOString().slice(0,10)}.html`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    showStatus('✅ 報告已下載，請用瀏覽器開啟！', 'success');
+    showToast('✅ 報告產生完成！', 'success');
+
+  } catch (err) {
+    showStatus(`❌ ${err.message}`, 'error');
+    showToast(`❌ 錯誤：${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ════════════════════════════════════════
+// UI 工具
+// ════════════════════════════════════════
+
+function showStatus(msg, type = '') {
+  const el = document.getElementById('status-msg');
+  el.textContent = msg;
+  el.className = 'status-msg ' + type;
+}
+
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = `toast ${type} show`;
+  setTimeout(() => t.classList.remove('show'), 3500);
+}
+
+// ════════════════════════════════════════
+// Tab 切換
+// ════════════════════════════════════════
+
+document.querySelectorAll('.tab-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById(`tab-${btn.dataset.tab}`).classList.add('active');
+  });
+});
+
+// ── 啟動 ──
+document.getElementById('retire-goal').addEventListener('change', save);
+document.getElementById('monthly-income').addEventListener('change', save);
+loadSaved();
+</script>
+</body>
+</html>

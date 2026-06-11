@@ -1,0 +1,54 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Asset Portfolio Report Generator - Serverless Lambda
+
+Globals:
+  Function:
+    Runtime: python3.11
+    Architectures: [arm64]
+    Environment:
+      Variables:
+        BEDROCK_REGION: ap-northeast-1
+        BEDROCK_HAIKU_MODEL: jp.anthropic.claude-haiku-4-5-20251001-v1:0
+        BEDROCK_SONNET_MODEL: jp.anthropic.claude-sonnet-4-6
+        API_KEY: !Ref ApiKeyParam
+
+Parameters:
+  ApiKeyParam:
+    Type: String
+    NoEcho: true
+    Description: Shared secret for X-Api-Key header validation
+
+Resources:
+
+  # ── Lambda：接收 HTTP POST，抓價 + 產 HTML ──
+  GenerateReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: asset-report-generator
+      CodeUri: src/generate_report/
+      Handler: app.lambda_handler
+      MemorySize: 512
+      Timeout: 120
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - bedrock:InvokeModel
+            Resource:
+              - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-*'
+              - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/jp.anthropic.claude-*'
+      # Lambda Function URL：無 API Gateway 30 秒限制，支援完整 120 秒執行
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins: ['*']
+          AllowMethods: ['*']
+          AllowHeaders: [content-type, x-api-key]
+
+Outputs:
+  ReportEndpointUrl:
+    Description: "貼入 index.html 的 Lambda 端點 URL"
+    Value: !GetAtt GenerateReportFunctionUrl.FunctionUrl
+  FunctionArn:
+    Value: !GetAtt GenerateReportFunction.Arn
