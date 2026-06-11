@@ -18,7 +18,7 @@ flowchart TB
         FURL["Lambda Function URL<br/>（CORS + 最長 120s）"]
         LB["Lambda: asset-report-generator<br/>Python 3.11 / ARM64 / 512MB"]
 
-        subgraph Bedrock["Amazon Bedrock（jp. 推理檔，資料留日本）"]
+        subgraph Bedrock["Amazon Bedrock（jp. 推理檔）"]
             HK["Claude Haiku 4.5<br/>數據彙整・新聞精選"]
             SN["Claude Sonnet 4.6<br/>數據驗證・操作建議・花費規劃"]
         end
@@ -196,3 +196,20 @@ asset-report-bot/
     ├── report_template.html      # 報告 HTML 模板（單一真相來源）
     └── memes/                    # 23 張情境梗圖（base64 內嵌報告）
 ```
+
+## 聲明
+
+### 梗圖版權聲明
+
+`src/generate_report/memes/` 內之圖片擷取自動畫《BanG Dream! It's MyGO!!!!!》《Ave Mujica》，
+著作權屬 © Bushiroad / BanG Dream! Project 及其相關權利人所有。
+
+- 本專案為**個人非營利**性質，圖片僅作粉絲二創（meme）用途，無任何商業使用
+- 本聲明不代表取得官方授權；若權利方提出要求，將**立即移除**相關圖片
+- Fork 本專案者請自行評估使用風險，或將 `memes/` 替換為自有圖片
+  （檔名對照 `claude_agent.py` 的 `MEME_LIBRARY` 即可無痛替換）
+
+### 投資免責聲明
+
+本工具產出之報告（含操作建議、退休試算、花費規劃）僅供個人參考，
+由 AI 與公式自動生成，**不構成任何投資建議**。投資有風險，決策請自行判斷並承擔。
