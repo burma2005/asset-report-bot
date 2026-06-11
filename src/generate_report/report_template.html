@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>資產配置報告</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/luxon@3/build/global/luxon.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-luxon@1.3.1/dist/chartjs-adapter-luxon.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/chartjs-chart-financial@0.2.1/dist/chartjs-chart-financial.min.js"></script>
+  <!-- TradingView 開源 K 線庫（v4 API 固定版本）-->
+  <script src="https://unpkg.com/lightweight-charts@4.2.0/dist/lightweight-charts.standalone.production.js"></script>
   <style>
     /* ── Reset & Base ── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -540,12 +539,20 @@ const fmtInt  = n => Math.round(n).toLocaleString('zh-TW');
 const fmtDec  = (n, d=2) => Number(n).toLocaleString('zh-TW', {minimumFractionDigits:d, maximumFractionDigits:d});
 const fmtPct  = n => fmtDec(n, 1) + '%';
 
+// 區塊防呆：單區渲染失敗只記 console，不中斷整份報告
+function safe(name, fn) {
+  try { fn(); } catch (e) { console.error('[render:' + name + ']', e); }
+}
+
 // ── Cover ──
+safe('cover', () => {
 document.getElementById('cover-total').textContent = fmtInt(D.total_twd);
 document.getElementById('cover-date').textContent  = D.generated_at;
 document.getElementById('footer-ts').textContent   = '資料更新：' + D.generated_at;
+});
 
 // ── 主配置圓餅圖（深色卡片風格）──
+safe('alloc', () => {
 document.getElementById('alloc-total-val').textContent = '$' + fmtInt(D.total_twd);
 
 const allocCtx = document.getElementById('chart-assets').getContext('2d');
@@ -609,7 +616,9 @@ legendEl.innerHTML = D.assets.map((a, i) => {
   </div>`;
 }).join('');
 
+});
 // ── 輔助小圖：大類別 / 加密 vs 傳統 ──
+safe('smallcharts', () => {
 function drawSmallDoughnut(canvasId, legendId, labels, values, colors, total) {
   const ctx = document.getElementById(canvasId).getContext('2d');
   new Chart(ctx, {
@@ -643,7 +652,9 @@ drawSmallDoughnut('chart-groups', 'legend-groups',
   groups.map(g => g.name), groups.map(g => g.value_twd),
   groups.map(g => CAT_COLOR[g.name] || '#8892a4'), D.total_twd);
 
+});
 // ── 風險示警 ──
+safe('alerts', () => {
 const alertsEl = document.getElementById('alerts-area');
 const alerts = D.alerts || [];
 if (alerts.length === 0) {
@@ -666,7 +677,9 @@ if (alerts.length === 0) {
     </div>`).join('');
 }
 
+});
 // ── Asset table ──
+safe('table', () => {
 const maxVal = Math.max(...D.assets.map(a => a.value_twd));
 const tbody  = document.getElementById('asset-tbody');
 
@@ -718,7 +731,9 @@ tbody.innerHTML = D.assets.map((a, i) => {
   </tr>`;
 }).join('');
 
+});
 // ── Retirement ──
+safe('retirement', () => {
 const r = D.retirement;
 document.getElementById('retire-grid').innerHTML = `
   <div>
@@ -747,62 +762,61 @@ if (r.progress_pct != null) {
     </div>`;
 }
 
-// ── 波動資產日線蠟燭圖（近 90 日）──
-const KL = D.klines || {};
-const klSyms = Object.keys(KL);
-if (klSyms.length > 0) {
-  document.getElementById('kline-section').style.display = 'block';
-  const grid = document.getElementById('kline-grid');
+});
+// ── 波動資產日線蠟燭圖（近 90 日，lightweight-charts）──
+try {
+  const KL = D.klines || {};
+  const klSyms = Object.keys(KL);
+  if (klSyms.length > 0 && window.LightweightCharts) {
+    document.getElementById('kline-section').style.display = 'block';
+    const grid = document.getElementById('kline-grid');
 
-  klSyms.forEach((sym, i) => {
-    const assetInfo = (D.assets || []).find(a => a.symbol === sym) || {};
-    const ccy  = assetInfo.currency || '';
-    const card = document.createElement('div');
-    card.className = 'chart-card';
-    card.innerHTML = `
-      <div class="chart-card-title">${sym}${assetInfo.name ? '・' + assetInfo.name : ''}（${ccy}）</div>
-      <div class="chart-wrap" style="height:220px"><canvas id="kline-${i}"></canvas></div>`;
-    grid.appendChild(card);
+    klSyms.forEach((sym, i) => {
+      const assetInfo = (D.assets || []).find(a => a.symbol === sym) || {};
+      const ccy  = assetInfo.currency || '';
+      const card = document.createElement('div');
+      card.className = 'chart-card';
+      card.innerHTML = `
+        <div class="chart-card-title">${sym}${assetInfo.name ? '・' + assetInfo.name : ''}（${ccy}）</div>
+        <div id="kline-${i}" style="height:220px"></div>`;
+      grid.appendChild(card);
 
-    const data = KL[sym].map(d => ({ x: d.t, o: d.o, h: d.h, l: d.l, c: d.c }));
-    new Chart(document.getElementById(`kline-${i}`).getContext('2d'), {
-      type: 'candlestick',
-      data: {
-        datasets: [{
-          label: sym,
-          data,
-          color:       { up: '#34d399', down: '#fb7185', unchanged: '#8892a4' },
-          borderColor: { up: '#34d399', down: '#fb7185', unchanged: '#8892a4' },
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: { display: false },
-          tooltip: {
-            backgroundColor: '#1e3a5f', titleColor: '#fff',
-            bodyColor: 'rgba(255,255,255,0.85)', padding: 10, cornerRadius: 8,
-          }
+      const el = document.getElementById(`kline-${i}`);
+      const chart = LightweightCharts.createChart(el, {
+        width: el.clientWidth || 400,
+        height: 220,
+        layout: {
+          background: { type: 'solid', color: 'transparent' },
+          textColor: '#8892a4',
+          fontSize: 10,
         },
-        scales: {
-          x: {
-            type: 'time',
-            time: { unit: 'month', tooltipFormat: 'yyyy-MM-dd' },
-            grid:  { color: 'rgba(255,255,255,0.05)' },
-            ticks: { color: '#8892a4', font: { size: 10 } },
-          },
-          y: {
-            grid:  { color: 'rgba(255,255,255,0.06)' },
-            ticks: { color: '#8892a4', font: { size: 10 } },
-          }
-        }
-      }
+        grid: {
+          vertLines: { color: 'rgba(255,255,255,0.05)' },
+          horzLines: { color: 'rgba(255,255,255,0.06)' },
+        },
+        timeScale: { borderColor: 'rgba(255,255,255,0.1)' },
+        rightPriceScale: { borderColor: 'rgba(255,255,255,0.1)' },
+        crosshair: { mode: 0 },
+      });
+      const series = chart.addCandlestickSeries({
+        upColor: '#34d399',   downColor: '#fb7185',
+        borderUpColor: '#34d399', borderDownColor: '#fb7185',
+        wickUpColor: '#34d399',   wickDownColor: '#fb7185',
+      });
+      // 時間需為 unix 秒、遞增且不重複
+      const seen = new Set();
+      const data = KL[sym]
+        .map(d => ({ time: Math.floor(d.t / 1000), open: d.o, high: d.h, low: d.l, close: d.c }))
+        .sort((a, b) => a.time - b.time)
+        .filter(d => !seen.has(d.time) && seen.add(d.time));
+      series.setData(data);
+      chart.timeScale().fitContent();
     });
-  });
-}
+  }
+} catch (e) { console.error('kline render failed:', e); }
 
 // ── 插槽式梗圖（台詞呼應段落內容）──
+safe('memes', () => {
 const SLOT_EL = {
   alerts:     'meme-alerts',
   allocation: 'meme-allocation',
@@ -822,7 +836,9 @@ const SLOT_EL = {
     </div>`;
 });
 
+});
 // ── 操作建議 ──
+safe('recs', () => {
 const recEl = document.getElementById('rec-area');
 const recs = D.recommendations || [];
 recEl.innerHTML = recs.length === 0
@@ -841,7 +857,9 @@ recEl.innerHTML = recs.length === 0
       </div>` : ''}
     </div>`).join('');
 
+});
 // ── 花費規劃 ──
+safe('spending', () => {
 const sp = D.spending_plan;
 if (sp) {
   document.getElementById('spending-section').style.display = 'block';
@@ -886,7 +904,9 @@ if (sp) {
     </div>`;
 }
 
+});
 // ── 資產耐久試算 ──
+safe('drawdown', () => {
 const dd = D.drawdown;
 if (dd) {
   document.getElementById('drawdown-section').style.display = 'block';
@@ -928,7 +948,9 @@ if (dd) {
   }).join('');
 }
 
+});
 // ── 持倉相關新聞 ──
+safe('news', () => {
 const newsEl = document.getElementById('news-area');
 const news = D.news || [];
 newsEl.innerHTML = news.length === 0
@@ -938,6 +960,7 @@ newsEl.innerHTML = news.length === 0
       <div class="news-title">${n.title_zh}</div>
       <div class="news-meta"><span class="news-tag">${n.related || '總經'}</span>${n.source || ''}</div>
     </a>`).join('');
+});
 </script>
 </body>
 </html>
