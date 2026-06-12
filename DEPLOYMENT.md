@@ -6,6 +6,37 @@
 
 ---
 
+## 如何使用本文件（人類看這段就夠了）
+
+1. Clone 本專案並在專案目錄啟動 Claude Code：
+
+   ```powershell
+   git clone https://github.com/burma2005/asset-report-bot.git
+   cd asset-report-bot
+   claude
+   ```
+
+2. 貼上這段 prompt：
+
+   ```
+   請閱讀 DEPLOYMENT.md 並依照其中的 Agent 部署 SOP，
+   把這個專案完整部署到我的 AWS 帳號。
+   遇到「人類介入點」時暫停並告訴我該做什麼，
+   其餘步驟全部由你執行並驗證。
+   部署完成後，幫我建立 index.local.html 並執行三段式驗證，
+   最後給我一份部署摘要（端點 URL、驗證結果、預估費用）。
+   ```
+
+3. 接下來 Agent 會自己跑。過程中**只有四件事需要你**（詳見下表）：
+   - 提供 AWS 帳號（事先註冊好）
+   - Agent 要求時，開新的 PowerShell 視窗執行 `aws login`，瀏覽器按「Allow」
+   - 若 Bedrock 模型未啟用，照 Agent 指示去 Console 點一次 Model Access
+   - 告知偏好的 region（不說就用預設東京）
+
+4. 完成後用瀏覽器開啟 `index.local.html` 即可開始使用。
+
+---
+
 ## 人類需要提供的事項（Agent 無法代勞）
 
 | # | 事項 | 時機 | 原因 |
