@@ -55,11 +55,14 @@ async def run(
     retirement_goal_monthly_twd: float = 0,
     monthly_income_twd: float = 0,
     advice_model: str = "haiku",
+    report_note: str = "",
 ) -> str:
     prices         = await fetch_all_prices(assets)
     portfolio_data = generate_portfolio_data(
         assets, prices, retirement_goal_monthly_twd, monthly_income_twd,
         advice_model)
+    if report_note:
+        portfolio_data["report_note"] = report_note
     return _build_html(portfolio_data)
 
 
@@ -91,5 +94,7 @@ def lambda_handler(event, _context):
     advice_model = body.get("advice_model", "haiku")
     if advice_model not in ("haiku", "sonnet"):
         advice_model = "haiku"
-    html = asyncio.run(run(assets, goal, income, advice_model))
+    # 選填：報告封面標註（如「虛構持倉範例」），限 40 字
+    report_note = str(body.get("report_note") or "")[:40]
+    html = asyncio.run(run(assets, goal, income, advice_model, report_note))
     return _ok(html)

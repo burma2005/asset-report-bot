@@ -576,6 +576,11 @@ safe('cover', () => {
 document.getElementById('cover-total').textContent = fmtInt(D.total_twd);
 document.getElementById('cover-date').textContent  = D.generated_at;
 document.getElementById('footer-ts').textContent   = '資料更新：' + D.generated_at;
+// 選填封面標註（如「虛構持倉範例」），醒目黃字
+if (D.report_note) {
+  const sub = document.querySelector('.cover-sub');
+  if (sub) sub.innerHTML = `<span style="color:#fbbf24;font-weight:800">⚠ ${D.report_note}</span>　` + sub.textContent;
+}
 });
 
 // ── 主配置圓餅圖（深色卡片風格）──
