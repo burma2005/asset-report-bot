@@ -932,47 +932,67 @@ if (sp) {
 }
 
 });
-// ── 資產耐久試算 ──
+// ── 資產耐久試算（點擊情境卡切換逐年表）──
 safe('drawdown', () => {
 const dd = D.drawdown;
 if (dd) {
   document.getElementById('drawdown-section').style.display = 'block';
 
-  // 三情境卡片（各配一張情境梗圖）
-  document.getElementById('drawdown-scenarios').innerHTML = dd.scenarios.map(s => {
+  // 渲染指定情境的逐年明細表
+  function renderDrawdownTable(idx) {
+    const s = dd.scenarios[idx];
+    const table = s.table || [];
+
+    document.getElementById('drawdown-caption').textContent =
+      `試算情境：${s.label}（年報酬 ${s.return_pct}%）｜首年提領 NT$ ${fmtInt(dd.first_year_withdrawal)}（你的月花費 ×12），之後每年依通膨 ${dd.inflation_pct}% 調升`;
+
+    const maxStart = table.length ? table[0].start : 1;
+    document.getElementById('drawdown-tbody').innerHTML = table.map(r => {
+      const barW = Math.max(0, (r.end / maxStart * 100)).toFixed(1);
+      const depleted = r.end <= 0;
+      return `<tr ${depleted ? 'style="background:rgba(251,113,133,0.12)"' : ''}>
+        <td>第 ${r.year} 年</td>
+        <td class="right">NT$ ${fmtInt(r.withdrawal)}</td>
+        <td class="right">NT$ ${fmtInt(r.start)}</td>
+        <td class="right" ${depleted ? 'style="color:var(--rose);font-weight:800"' : ''}>${depleted ? '⚠ 耗盡' : 'NT$ ' + fmtInt(r.end)}</td>
+        <td>
+          <div class="bar-cell">
+            <div class="bar-track"><div class="bar-fill" style="width:${barW}%;background:${depleted ? 'var(--rose)' : 'var(--teal)'}"></div></div>
+          </div>
+        </td>
+      </tr>`;
+    }).join('');
+
+    // 高亮目前選中的卡片
+    document.querySelectorAll('#drawdown-scenarios .kpi').forEach((el, i) => {
+      el.style.borderColor = i === idx ? 'var(--blue)' : 'var(--line)';
+      el.style.boxShadow   = i === idx ? '0 0 0 1px var(--blue)' : 'none';
+    });
+  }
+
+  // 三情境卡片（各配一張情境梗圖，可點擊切換下方表格）
+  document.getElementById('drawdown-scenarios').innerHTML = dd.scenarios.map((s, i) => {
     const yearsStr = s.sustainable ? `${s.years}+ 年` : `${s.years} 年`;
     const chip = s.sustainable ? 'chip-green' : s.years >= 30 ? 'chip-blue' : 'chip-amber';
     const memeHtml = s.meme && s.meme.data_uri ? `
       <img class="scenario-meme" src="${s.meme.data_uri}" alt="" />
       <div class="scenario-quote">「${s.meme.caption}」</div>` : '';
-    return `<div class="kpi">
+    return `<div class="kpi" data-idx="${i}" style="cursor:pointer;transition:border-color 0.15s, box-shadow 0.15s" title="點擊查看此情境的逐年明細">
       <div class="kpi-label">${s.label}情境（年報酬 ${s.return_pct}%）</div>
       <div class="kpi-value">${yearsStr}</div>
-      <div class="kpi-sub">資產可支撐年數</div>
+      <div class="kpi-sub">資產可支撐年數・點卡片切換下表</div>
       <span class="kpi-chip ${chip}">${s.sustainable ? '永續' : s.years >= 30 ? '充足' : '偏短'}</span>
       ${memeHtml}
     </div>`;
   }).join('');
 
-  document.getElementById('drawdown-caption').textContent =
-    `試算情境：${dd.table_scenario}｜首年提領 NT$ ${fmtInt(dd.first_year_withdrawal)}（你的月花費 ×12），之後每年依通膨 ${dd.inflation_pct}% 調升`;
+  document.querySelectorAll('#drawdown-scenarios .kpi').forEach(el => {
+    el.addEventListener('click', () => renderDrawdownTable(parseInt(el.dataset.idx)));
+  });
 
-  const maxStart = dd.table.length ? dd.table[0].start : 1;
-  document.getElementById('drawdown-tbody').innerHTML = dd.table.map(r => {
-    const barW = Math.max(0, (r.end / maxStart * 100)).toFixed(1);
-    const depleted = r.end <= 0;
-    return `<tr ${depleted ? 'style="background:rgba(251,113,133,0.12)"' : ''}>
-      <td>第 ${r.year} 年</td>
-      <td class="right">NT$ ${fmtInt(r.withdrawal)}</td>
-      <td class="right">NT$ ${fmtInt(r.start)}</td>
-      <td class="right" ${depleted ? 'style="color:var(--rose);font-weight:800"' : ''}>${depleted ? '⚠ 耗盡' : 'NT$ ' + fmtInt(r.end)}</td>
-      <td>
-        <div class="bar-cell">
-          <div class="bar-track"><div class="bar-fill" style="width:${barW}%;background:${depleted ? 'var(--rose)' : 'var(--teal)'}"></div></div>
-        </div>
-      </td>
-    </tr>`;
-  }).join('');
+  // 預設顯示中性情境
+  const defaultIdx = Math.max(0, dd.scenarios.findIndex(s => s.label === '中性'));
+  renderDrawdownTable(defaultIdx);
 }
 
 });

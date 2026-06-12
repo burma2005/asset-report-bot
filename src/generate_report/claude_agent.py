@@ -544,7 +544,6 @@ def simulate_drawdown(total_twd: float, monthly_first_year: float) -> dict | Non
         return MAX_SIM_YEARS, rows      # 撐滿上限
 
     scenarios = []
-    neutral_table: list[dict] = []
     for sc in RETURN_SCENARIOS:
         years, rows = run(sc["rate"])
         scenarios.append({
@@ -552,16 +551,13 @@ def simulate_drawdown(total_twd: float, monthly_first_year: float) -> dict | Non
             "return_pct": round(sc["rate"] * 100, 1),
             "years": years,
             "sustainable": years >= MAX_SIM_YEARS,
+            "table": rows[:40],   # 每個情境各自的逐年明細（最多 40 年）
         })
-        if sc["label"] == "中性":
-            neutral_table = rows
 
     return {
         "inflation_pct": round(INFLATION_RATE * 100, 1),
         "first_year_withdrawal": round(annual_w0),
         "scenarios": scenarios,
-        "table": neutral_table[:40],   # 最多顯示 40 年
-        "table_scenario": "中性（年報酬 5%）",
     }
 
 
