@@ -113,27 +113,60 @@ async def _fetch_binance_klines(client: httpx.AsyncClient, sym: str) -> list | N
 
 
 async def _fetch_yahoo_klines(client: httpx.AsyncClient, sym: str) -> list | None:
+    """日線 OHLC，一律使用還原價（adjusted）——
+    以 adjclose/close 比例縮放整組 OHLC，消除分割/配息造成的假斷崖
+    （例：1306.T 曾分割，未還原會顯示崩盤式跳空）"""
     try:
         resp = await client.get(
             f"https://query1.finance.yahoo.com/v8/finance/chart/{sym.upper()}",
-            params={"range": "3mo", "interval": "1d"},
+            params={"range": "3mo", "interval": "1d",
+                    "includeAdjustedClose": "true"},
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=8,
         )
         resp.raise_for_status()
         result = resp.json()["chart"]["result"][0]
-        ts = result["timestamp"]
-        q  = result["indicators"]["quote"][0]
+        ts  = result["timestamp"]
+        q   = result["indicators"]["quote"][0]
+        adj = (result["indicators"].get("adjclose") or [{}])[0].get("adjclose")
+
         out = []
         for i, t in enumerate(ts):
             o, h, l, c = q["open"][i], q["high"][i], q["low"][i], q["close"][i]
-            if None in (o, h, l, c):
+            if None in (o, h, l, c) or c == 0:
                 continue
-            out.append({"t": t * 1000, "o": round(o, 4), "h": round(h, 4),
-                        "l": round(l, 4), "c": round(c, 4)})
+            # 還原係數：當日 adjclose / close；無 adjclose 資料時不調整
+            ratio = 1.0
+            if adj and i < len(adj) and adj[i] is not None:
+                ratio = adj[i] / c
+            out.append({
+                "t": t * 1000,
+                "o": round(o * ratio, 4), "h": round(h * ratio, 4),
+                "l": round(l * ratio, 4), "c": round(c * ratio, 4),
+            })
+        _adjust_splits(out)
         return out or None
     except Exception:
         return None
+
+
+def _adjust_splits(out: list[dict]) -> None:
+    """第二道防線：Yahoo adjclose 偶爾漏掉分割（如 1306.T），
+    自行偵測相鄰日異常跳空（比值 ≥1.8 或 ≤0.55 視為分割/反向分割），
+    以精確比例回溯縮放更早的所有 K 棒，使序列連續。"""
+    i = 1
+    while i < len(out):
+        prev_c = out[i - 1]["c"]
+        cur_o  = out[i]["o"] or out[i]["c"]
+        if cur_o <= 0 or prev_c <= 0:
+            i += 1
+            continue
+        ratio = prev_c / cur_o
+        if ratio >= 1.8 or ratio <= 0.55:
+            for j in range(i):
+                for k in ("o", "h", "l", "c"):
+                    out[j][k] = round(out[j][k] / ratio, 4)
+        i += 1
 
 
 async def fetch_klines(client: httpx.AsyncClient, assets: dict) -> dict:

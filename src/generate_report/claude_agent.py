@@ -706,19 +706,27 @@ def generate_portfolio_data(
     # 資產耐久試算（首年提領 = 月花費×12，逐年通膨 2% 調整）
     drawdown = simulate_drawdown(total_twd, retirement_goal_monthly_twd)
     if drawdown:
-        # 各情境依可撐年數配梗圖：<25年 poor / <40年 grind / <60年 happy / 永續 victory
+        # 三情境固定台詞：
+        #   保守 3% →「收入實在太少了」
+        #   中性 5% →「人生這麼漫長，會撐不住的喔」
+        #   樂觀 7% →「那當然是騙人的啊」（7% 年報酬？）
+        SCENARIO_MEMES = {
+            "保守": ("poor1.jpg",  "收入實在太少了"),
+            "中性": ("grind2.jpg", "人生這麼漫長，會撐不住的喔"),
+            "樂觀": ("depeg.jpg",  "那當然是騙人的啊"),
+        }
         for sc in drawdown["scenarios"]:
-            if sc["sustainable"]:
-                mood = "victory"
-            elif sc["years"] >= 40:
-                mood = "happy"
-            elif sc["years"] >= 25:
-                mood = "grind"
-            else:
-                mood = "poor"
-            m = _load_meme(mood, "drawdown", "", used_memes)
-            if m:
-                sc["meme"] = {"caption": m["caption"], "data_uri": m["data_uri"]}
+            filename, caption = SCENARIO_MEMES.get(sc["label"], (None, None))
+            if not filename:
+                continue
+            try:
+                with open(os.path.join(MEME_DIR, filename), "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                used_memes.add(filename)
+                sc["meme"] = {"caption": caption,
+                              "data_uri": f"data:image/jpeg;base64,{b64}"}
+            except Exception:
+                pass
     validated["drawdown"] = drawdown
 
     # 波動資產日線 K 線（近 90 日，模板渲染蠟燭圖）
