@@ -126,6 +126,14 @@
       content: ''; flex: 1; height: 1px; background: var(--line);
     }
 
+    /* ── AI fallback notice ── */
+    .ai-fallback {
+      padding: 14px 18px; border-radius: 8px; font-size: 0.8rem; line-height: 1.6;
+      background: rgba(91,142,240,0.06); border: 1px dashed rgba(91,142,240,0.25);
+      color: var(--ink-muted); display: flex; align-items: flex-start; gap: 10px;
+    }
+    .ai-fallback-icon { font-size: 1.1rem; flex-shrink: 0; margin-top: 1px; }
+
     /* ── KPI strip ── */
     .kpi-strip {
       display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
@@ -407,6 +415,12 @@
     </div>
   </div>
 
+  <!-- AI Summary -->
+  <div id="ai-summary-section" style="display:none">
+    <div class="section-title">📋 AI 投資組合總評</div>
+    <div class="alert-card alert-ok" id="ai-summary-card" style="line-height:1.8;font-size:0.88rem"></div>
+  </div>
+
   <!-- Allocation chart (dark full-width) -->
   <div class="section-title">配置分析</div>
   <div class="alloc-card">
@@ -443,6 +457,12 @@
   <!-- Allocation meme slot -->
   <div id="meme-allocation"></div>
 
+  <!-- Risk Narrative -->
+  <div id="risk-narrative-section" style="display:none">
+    <div class="section-title" style="margin-top:28px;">🛡️ AI 風險評估</div>
+    <div class="alert-card alert-warning" id="risk-narrative-card" style="line-height:1.8;font-size:0.88rem"></div>
+  </div>
+
   <!-- Alerts -->
   <div class="section-title" style="margin-top:28px;">風險示警</div>
   <div id="alerts-area"></div>
@@ -452,9 +472,19 @@
   <div class="section-title" style="margin-top:28px;">持倉相關新聞</div>
   <div id="news-area"></div>
 
-  <!-- Recommendations -->
-  <div class="section-title" style="margin-top:28px;">操作建議</div>
-  <div id="rec-area"></div>
+  <!-- Reallocation Advice -->
+  <div id="realloc-section" style="display:none">
+    <div class="section-title" style="margin-top:28px;">🎯 AI 資產再配置建議</div>
+    <div id="realloc-assessment"></div>
+    <div class="charts-row" id="realloc-profiles"></div>
+    <div id="realloc-regional-note"></div>
+  </div>
+
+  <!-- Asset Commentary -->
+  <div id="asset-commentary-section" style="display:none">
+    <div class="section-title" style="margin-top:28px;">💬 AI 逐筆資產點評</div>
+    <div id="asset-commentary-area"></div>
+  </div>
 
   <!-- Table -->
   <div class="section-title">資產明細</div>
@@ -482,6 +512,7 @@
     <div id="retire-progress-area"></div>
     <div id="meme-retirement"></div>
     <div class="retire-note" id="retire-note">—</div>
+    <div id="retirement-narrative" style="display:none;margin-top:16px;padding:16px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:0.88rem;line-height:1.8;color:rgba(255,255,255,0.85)"></div>
   </div>
 
   <!-- Spending plan -->
@@ -523,6 +554,9 @@
       </div>
     </div>
   </div>
+
+  <!-- AI Disclaimer -->
+  <div id="ai-disclaimer" style="display:none;margin-top:28px;padding:16px 20px;background:#2a1a1a;border:1px solid #5a2020;border-radius:8px;font-size:0.78rem;line-height:1.7;color:#e8a0a0"></div>
 
   <!-- Footer -->
   <div class="footer">
@@ -733,7 +767,7 @@ tbody.innerHTML = D.assets.map((a, i) => {
   const abbr    = a.symbol.replace(/\.(TW|TWO|T|HK|L)$/i, '').slice(0, 4);
   const color   = PALETTE[i % PALETTE.length];
   const qtyStr  = a.amount != null
-    ? `${fmtDec(a.amount, a.amount < 1 ? 4 : 0)} ${a.unit || ''}`
+    ? `${fmtDec(a.amount, a.amount % 1 === 0 ? 0 : a.amount < 1 ? 4 : 2)} ${a.unit || ''}`
     : '—';
   // 最新報價：原幣顯示（如 535.20 USD / 99.85 TWD / 410 JPY）
   let priceStr = '—';
@@ -815,14 +849,45 @@ try {
     document.getElementById('kline-section').style.display = 'block';
     const grid = document.getElementById('kline-grid');
 
+    const kaMap = {};
+    const kaArr = D.kline_analysis || [];
+    kaArr.forEach(a => { kaMap[a.symbol] = a; });
+    // K 線圖有資料但 AI 分析為空 → 在 grid 前插入提示
+    if (kaArr.length === 0) {
+      const notice = document.createElement('div');
+      notice.style.cssText = 'margin-bottom:12px;width:100%';
+      notice.innerHTML = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>K 線技術分析由 AI 模型生成，目前因免費模型額度限制未能產出。圖表數據不受影響，重新產生報告即可嘗試取得 AI 操作建議。</div></div>`;
+      grid.appendChild(notice);
+    }
+    const sigColor = {'偏多':'#34d399','偏空':'#fb7185','中性':'#8892a4'};
+
     klSyms.forEach((sym, i) => {
       const assetInfo = (D.assets || []).find(a => a.symbol === sym) || {};
       const ccy  = assetInfo.currency || '';
+      const ka   = kaMap[sym];
       const card = document.createElement('div');
       card.className = 'chart-card';
+      let kaHtml = '';
+      if (ka) {
+        const sc = sigColor[ka.signal] || '#8892a4';
+        kaHtml = `
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="display:flex;gap:8px;align-items:center">
+              <span style="font-size:0.78rem;color:var(--ink-muted)">${ka.trend || ''}</span>
+              <span style="padding:2px 10px;border-radius:12px;font-size:0.72rem;font-weight:700;background:${sc}22;color:${sc}">${ka.signal || ''}</span>
+            </div>
+            <div style="display:flex;gap:12px;font-size:0.75rem;color:var(--ink-muted)">
+              ${ka.support ? '<span>支撐：<strong style="color:#34d399">'+ka.support+'</strong></span>' : ''}
+              ${ka.resistance ? '<span>壓力：<strong style="color:#fb7185">'+ka.resistance+'</strong></span>' : ''}
+            </div>
+          </div>
+          <div style="font-size:0.82rem;line-height:1.7;color:var(--ink-light)">${ka.analysis || ''}</div>
+        </div>`;
+      }
       card.innerHTML = `
         <div class="chart-card-title">${sym}${assetInfo.name ? '・' + assetInfo.name : ''}（${ccy}）</div>
-        <div id="kline-${i}" style="height:220px"></div>`;
+        <div id="kline-${i}" style="height:220px"></div>${kaHtml}`;
       grid.appendChild(card);
 
       const el = document.getElementById(`kline-${i}`);
@@ -879,27 +944,6 @@ const SLOT_EL = {
       </div>
     </div>`;
 });
-
-});
-// ── 操作建議 ──
-safe('recs', () => {
-const recEl = document.getElementById('rec-area');
-const recs = D.recommendations || [];
-recEl.innerHTML = recs.length === 0
-  ? '<div class="rec-card"><span class="rec-action rec-不動">不動</span><div><div class="rec-target">維持現有配置</div><div class="rec-reason">未產生具體建議</div></div></div>'
-  : recs.map(r => `
-    <div class="rec-card">
-      <span class="rec-action rec-${r.action}">${r.action}</span>
-      <div style="flex:1">
-        <div class="rec-target">${r.target}</div>
-        <div class="rec-reason">${r.reason || ''}</div>
-      </div>
-      ${r.meme && r.meme.data_uri ? `
-      <div style="flex-shrink:0;text-align:center;margin-left:8px">
-        <img src="${r.meme.data_uri}" alt="" style="width:220px;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,0.4)" />
-        <div style="font-size:0.82rem;font-weight:700;color:var(--ink-light);margin-top:6px">「${r.meme.caption}」</div>
-      </div>` : ''}
-    </div>`).join('');
 
 });
 // ── 花費規劃 ──
@@ -1024,6 +1068,105 @@ newsEl.innerHTML = news.length === 0
       <div class="news-title">${n.title_zh}</div>
       <div class="news-meta"><span class="news-tag">${n.related || '總經'}</span>${n.source || ''}</div>
     </a>`).join('');
+});
+const AI_FALLBACK = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>本區塊由 AI 模型生成，目前因免費模型額度限制未能產出。這不影響報告的數據正確性（所有數字皆由程式精算），重新產生報告即可嘗試取得 AI 分析。</div></div>`;
+
+// ── AI 投資組合總評 ──
+safe('ai_summary', () => {
+  document.getElementById('ai-summary-section').style.display = 'block';
+  const s = D.ai_summary;
+  document.getElementById('ai-summary-card').innerHTML = s
+    ? `<div class="alert-icon">🤖</div><div>${s}</div>`
+    : AI_FALLBACK;
+});
+// ── AI 風險評估 ──
+safe('risk_narrative', () => {
+  document.getElementById('risk-narrative-section').style.display = 'block';
+  const r = D.risk_narrative;
+  document.getElementById('risk-narrative-card').innerHTML = r
+    ? `<div class="alert-icon">🛡️</div><div>${r}</div>`
+    : AI_FALLBACK;
+});
+// ── AI 逐筆資產點評 ──
+safe('asset_commentary', () => {
+  document.getElementById('asset-commentary-section').style.display = 'block';
+  const ac = D.asset_commentary || [];
+  document.getElementById('asset-commentary-area').innerHTML = ac.length > 0
+    ? ac.map(a => `
+      <div class="rec-card">
+        <span class="rec-action rec-觀察" style="min-width:60px;text-align:center">${a.symbol}</span>
+        <div style="flex:1"><div class="rec-reason">${a.commentary || ''}</div></div>
+      </div>`).join('')
+    : AI_FALLBACK;
+});
+// ── AI 退休敘事分析 ──
+safe('retirement_narrative', () => {
+  const el = document.getElementById('retirement-narrative');
+  el.style.display = 'block';
+  const rn = D.retirement_narrative;
+  el.innerHTML = rn
+    ? `<strong style="color:rgba(255,255,255,0.5);font-size:0.75rem">AI 退休分析</strong><br>${rn}`
+    : AI_FALLBACK;
+});
+// ── AI 資產再配置建議 ──
+safe('realloc', () => {
+  document.getElementById('realloc-section').style.display = 'block';
+  const ra = D.reallocation;
+  if (!ra || !ra.profiles) {
+    document.getElementById('realloc-profiles').innerHTML = AI_FALLBACK;
+    return;
+  }
+
+    if (ra.current_assessment) {
+      document.getElementById('realloc-assessment').innerHTML = `
+        <div class="alert-card alert-ok" style="margin-bottom:16px">
+          <div class="alert-icon">📊</div>
+          <div>
+            <div class="alert-title">目前配置風格評估</div>
+            <div class="alert-detail">${ra.current_assessment}</div>
+          </div>
+        </div>`;
+    }
+
+    const profileColors = {'積極型':'var(--rose)','穩健型':'var(--blue)','保守型':'var(--teal)'};
+    document.getElementById('realloc-profiles').innerHTML = ra.profiles.map(p => {
+      const color = profileColors[p.name] || 'var(--blue)';
+      const allocItems = Object.entries(p.target_allocation || {}).map(([k,v]) =>
+        `<div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px">
+          <span>${k}</span><strong>${v}%</strong></div>`).join('');
+      const regionItems = Object.entries(p.regional_mix || {}).map(([k,v]) =>
+        `<div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px">
+          <span>${k}</span><strong>${v}%</strong></div>`).join('');
+      return `<div class="chart-card" style="border-top:3px solid ${color}">
+        <div class="chart-card-title" style="color:${color}">${p.name}</div>
+        <div style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:12px">${p.description || ''}</div>
+        <div style="font-size:0.72rem;font-weight:700;color:var(--ink-muted);margin-bottom:6px">目標部位配置</div>
+        ${allocItems}
+        <div style="font-size:0.72rem;font-weight:700;color:var(--ink-muted);margin:12px 0 6px">區域配置</div>
+        ${regionItems}
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:0.85rem;line-height:1.7">${p.advice || ''}</div>
+      </div>`;
+    }).join('');
+
+    if (ra.regional_risk_note) {
+      document.getElementById('realloc-regional-note').innerHTML = `
+        <div class="alert-card alert-warning" style="margin-top:12px">
+          <div class="alert-icon">🌍</div>
+          <div>
+            <div class="alert-title">地理集中風險提醒</div>
+            <div class="alert-detail">${ra.regional_risk_note}</div>
+          </div>
+        </div>`;
+    }
+});
+// ── AI 風險警語 ──
+safe('disclaimer', () => {
+  const disc = D.ai_disclaimer;
+  if (disc) {
+    const el = document.getElementById('ai-disclaimer');
+    el.style.display = 'block';
+    el.textContent = disc;
+  }
 });
 </script>
 </body>

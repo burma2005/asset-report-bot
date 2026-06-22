@@ -11,13 +11,18 @@ Globals:
         OPENROUTER_API_KEY: !Ref OpenRouterKeyParam
         OPENROUTER_RACE_MODELS: !Ref OpenRouterRaceModelsParam
         OPENROUTER_MODELS: !Ref OpenRouterModelsParam
-        API_KEY: !Ref ApiKeyParam
+        GOOGLE_CLIENT_ID: !Ref GoogleClientIdParam
+        ADMIN_EMAIL: !Ref AdminEmailParam
+        USERS_TABLE: !Ref UsersTable
 
 Parameters:
-  ApiKeyParam:
+  GoogleClientIdParam:
     Type: String
-    NoEcho: true
-    Description: Shared secret for X-Api-Key header validation
+    Description: Google OAuth 2.0 Client ID for ID token verification
+  AdminEmailParam:
+    Type: String
+    Default: "burma2005@gmail.com"
+    Description: Admin email (unlimited quota, paid backstop allowed)
   OpenRouterKeyParam:
     Type: String
     NoEcho: true
@@ -33,6 +38,19 @@ Parameters:
 
 Resources:
 
+  # ── DynamoDB：用戶層級 + 額度 + 持倉快照 ──
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: asset-report-users
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: email
+          KeyType: HASH
+
   # ── Lambda：接收 HTTP POST，抓價 + 產 HTML ──
   GenerateReportFunction:
     Type: AWS::Serverless::Function
@@ -41,15 +59,16 @@ Resources:
       CodeUri: src/generate_report/
       Handler: app.lambda_handler
       MemorySize: 512
-      Timeout: 175
-      # AI 改由 OpenRouter（HTTPS 外呼），不再需要 Bedrock IAM 權限
-      # Lambda Function URL：無 API Gateway 30 秒限制，支援完整 120 秒執行
+      Timeout: 300
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
       FunctionUrlConfig:
         AuthType: NONE
         Cors:
           AllowOrigins: ['*']
           AllowMethods: ['*']
-          AllowHeaders: [content-type, x-api-key]
+          AllowHeaders: [content-type, authorization]
 
 Outputs:
   ReportEndpointUrl:
@@ -57,3 +76,5 @@ Outputs:
     Value: !GetAtt GenerateReportFunctionUrl.FunctionUrl
   FunctionArn:
     Value: !GetAtt GenerateReportFunction.Arn
+  UsersTableName:
+    Value: !Ref UsersTable

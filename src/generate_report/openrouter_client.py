@@ -76,8 +76,8 @@ def _call_one(model: str, headers: dict, system: str, user: str, max_tokens: int
     return text
 
 
-def call_llm(system: str, user: str, max_tokens: int = 4096) -> str:
-    """免費競速 → 付費兜底。全部失敗才拋例外。"""
+def call_llm(system: str, user: str, max_tokens: int = 4096, allow_paid: bool = True) -> str:
+    """免費競速 → 付費兜底。allow_paid=False 時跳過付費兜底。"""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     if not api_key:
         raise RuntimeError("OPENROUTER_API_KEY 未設定")
@@ -105,11 +105,12 @@ def call_llm(system: str, user: str, max_tokens: int = 4096) -> str:
         finally:
             ex.shutdown(wait=False)            # 不等落敗（仍在跑）的那個，避免拖慢
 
-    # ── 2) 付費兜底：依序呼叫，保證有結果 ──
-    for m in _backstop_models():
-        try:
-            return _call_one(m, headers, system, user, max_tokens)
-        except Exception as e:
-            last_error = e
+    # ── 2) 付費兜底：依序呼叫，保證有結果（general 層跳過）──
+    if allow_paid:
+        for m in _backstop_models():
+            try:
+                return _call_one(m, headers, system, user, max_tokens)
+            except Exception as e:
+                last_error = e
 
-    raise RuntimeError(f"所有模型皆失敗（競速+兜底）: {last_error}")
+    raise RuntimeError(f"所有模型皆失敗（競速{'+兜底' if allow_paid else ''}）: {last_error}")

@@ -16,6 +16,9 @@ test_report_output.html
 local_test.py
 portfolio_report*.html
 
+# Google OAuth client secret
+client_secret_*.json
+
 # Python
 __pycache__/
 *.pyc

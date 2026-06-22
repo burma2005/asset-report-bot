@@ -123,8 +123,9 @@ def _build_asset_lines(assets: dict, prices: dict) -> list[dict]:
     return asset_lines
 
 
-def step1_haiku_summarize(assets: dict, prices: dict) -> dict:
-    """Haiku：計算每項資產市值、類別彙總、4% 退休試算"""
+def step1_haiku_summarize(assets: dict, prices: dict, allow_paid: bool = True) -> dict:
+    """Haiku：計算每項資產市值、類別彙總、4% 退休試算。
+    免費全失敗時回傳空殼（數字由 generate_portfolio_data 純 Python 重算）。"""
     asset_lines = _build_asset_lines(assets, prices)
     total_twd = sum(a["value_twd"] for a in asset_lines)
 
@@ -164,8 +165,11 @@ note 欄位規則（每筆資產一句 8 字以內的中文說明）：
 categories 必須使用以下子類別名稱（依實際持有產生）：
 鏈上現金、鏈下現金、加密部位、台股、日股、美股、債券"""
 
-    raw = call_llm(_HAIKU_SYSTEM, prompt, max_tokens=2048)
-    return _extract_json(raw)
+    try:
+        raw = call_llm(_HAIKU_SYSTEM, prompt, max_tokens=2048, allow_paid=allow_paid)
+        return _extract_json(raw)
+    except Exception:
+        return {"assets": [], "categories": [], "retirement": {}}
 
 
 # 註：原 Step 2「Sonnet 數字驗證」已移除——所有數字（市值/占比/類別彙總）
@@ -328,17 +332,32 @@ def _pick_memes(
         prog, ctx = "neutral", "尚未設定退休目標"
     elif progress_pct >= 100:
         prog, ctx = "victory", f"達成率 {progress_pct:.0f}%，財務自由"
-    elif progress_pct >= 75:
+    elif progress_pct >= 76:
         prog, ctx = "near_goal", f"達成率 {progress_pct:.0f}%，就快到了"
-    elif progress_pct >= 50:
-        prog, ctx = "happy", f"達成率 {progress_pct:.0f}%，過半了"
-    elif progress_pct >= 10:
+    elif progress_pct >= 26:
         prog, ctx = "grind", f"達成率 {progress_pct:.0f}%，還在路上"
     else:
         prog, ctx = "poor", f"達成率僅 {progress_pct:.0f}%"
-    m = _load_meme(prog, "retirement", ctx, used)
-    if m:
-        memes.append(m)
+    RETIRE_MEME_MAP = {
+        "poor": ("poor2.jpg", "只要是我能做的，我什麼都願意做"),
+        "grind": ("grind1.jpg", "我還是會繼續下去"),
+        "near_goal": ("neutral1.jpg", "普通和理所當然什麼呢"),
+        "victory": ("victory2.jpg", "謝謝大家"),
+        "neutral": ("crash4.jpg", "為什麼不設定退休目標"),
+    }
+    retire_file, retire_caption = RETIRE_MEME_MAP.get(prog, ("neutral1.jpg", ""))
+    try:
+        with open(os.path.join(MEME_DIR, retire_file), "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        memes.append({
+            "mood": prog, "slot": "retirement", "context": ctx,
+            "caption": retire_caption,
+            "data_uri": f"data:image/jpeg;base64,{b64}",
+        })
+        if used is not None:
+            used.add(retire_file)
+    except Exception:
+        pass
 
     return memes
 
@@ -364,7 +383,7 @@ def generate_recommendations(
     signals: dict,
     monthly_income_twd: float = 0,
     goal_monthly_twd: float = 0,
-    advice_model: str = "haiku",
+    allow_paid: bool = True,
 ) -> list[dict]:
     income_line = (
         f"月收入 NT$ {round(monthly_income_twd):,}，月生活費 NT$ {round(goal_monthly_twd):,}，"
@@ -385,13 +404,12 @@ def generate_recommendations(
 請給出操作建議（需考量收支狀況：有儲蓄力可建議定期定額標的與金額；已退休則重視防禦）。"""
 
     try:
-        raw = call_llm(_ADVICE_SYSTEM, prompt, max_tokens=1024)
+        raw = call_llm(_ADVICE_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid)
         start = raw.find("[")
         end   = raw.rfind("]") + 1
         if start == -1:
             return []
         recs = json.loads(raw[start:end])
-        # 只保留合法 action
         valid = {"加碼", "減碼", "不動", "觀察", "再平衡"}
         return [r for r in recs if r.get("action") in valid][:5]
     except Exception:
@@ -411,14 +429,13 @@ _NEWS_SYSTEM = """你是財經新聞編輯。從給定的新聞列表中，挑�
 [{"title_zh":"...","source":"...","url":"...","related":"BTC"}]"""
 
 
-def select_news(news_raw: list[dict]) -> list[dict]:
+def select_news(news_raw: list[dict], allow_paid: bool = True) -> list[dict]:
     if not news_raw:
         return []
-    # 最多給 Haiku 20 則候選，控制 token
     candidates = news_raw[:20]
     prompt = "新聞列表：\n" + json.dumps(candidates, ensure_ascii=False, indent=1)
     try:
-        raw = call_llm(_NEWS_SYSTEM, prompt, max_tokens=1024)
+        raw = call_llm(_NEWS_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid)
         start = raw.find("[")
         end   = raw.rfind("]") + 1
         if start == -1:
@@ -456,6 +473,7 @@ _SPENDING_SYSTEM = """你是務實的家庭理財顧問。根據用戶的預計�
 def generate_spending_plan(
     goal_monthly_twd: float,
     monthly_income_twd: float = 0,
+    allow_paid: bool = True,
 ) -> dict | None:
     """依用戶月花費、月收入與台灣官方基準，生成花費規劃。未填目標回傳 None"""
     if goal_monthly_twd <= 0:
@@ -478,7 +496,7 @@ def generate_spending_plan(
 若已退休：聚焦控制花費與提領節奏。"""
 
     try:
-        raw  = call_llm(_SPENDING_SYSTEM, prompt, max_tokens=1024)
+        raw  = call_llm(_SPENDING_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid)
         plan = _extract_json(raw)
         # 程式碼端強制補上基準數據與用戶數字（不信任模型）
         plan["monthly_twd"] = round(goal_monthly_twd)
@@ -493,6 +511,304 @@ def generate_spending_plan(
         return plan
     except Exception:
         return None
+
+
+# ── AI 深度分析函式（5 項新增）─────────────────────────
+
+_SUMMARY_SYSTEM = """你是一位資深財富管理顧問，正在撰寫投資組合健康檢查報告。請用繁體中文回答。
+只輸出純文字段落（3~5 句），不要 JSON、不要標題、不要條列。語氣溫和但專業。"""
+
+
+def generate_portfolio_summary(
+    validated: dict,
+    signals: dict,
+    monthly_income_twd: float,
+    goal_monthly_twd: float,
+    allow_paid: bool = True,
+) -> str:
+    """AI 產出投資組合總覽摘要（3-5 句）"""
+    groups_str = json.dumps(validated.get("groups", []), ensure_ascii=False)
+    cats_str = json.dumps(validated.get("categories", []), ensure_ascii=False)
+    retirement = validated.get("retirement", {})
+    progress = retirement.get("progress_pct", "未設定")
+
+    prompt = f"""以下是用戶的投資組合現況，請分析整體配置健康度、集中風險、區域分散性、距離退休目標的距離，以及主要隱憂。
+
+總資產（TWD）：{validated.get('total_twd', 0):,}
+四大部位分布：{groups_str}
+子類別分布：{cats_str}
+退休目標進度：{progress}%
+月收入：NT$ {round(monthly_income_twd):,}
+月生活費：NT$ {round(goal_monthly_twd):,}
+市場訊號（24h漲跌）：{json.dumps(signals, ensure_ascii=False)}"""
+
+    try:
+        return call_llm(_SUMMARY_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid).strip()
+    except Exception:
+        return ""
+
+
+_COMMENTARY_SYSTEM = """你是投資組合分析師，為每項重要持倉提供逐項點評。請用繁體中文回答。
+輸出 JSON 陣列，每個元素 {"symbol": "XXX", "commentary": "1~2 句分析"}。
+重點：該資產在同類別中的集中度、24h 波動、成長/風險展望。
+只輸出 JSON 陣列，不要任何說明文字。"""
+
+
+def generate_asset_commentary(
+    validated: dict,
+    signals: dict,
+    allow_paid: bool = True,
+) -> list[dict]:
+    """AI 產出逐資產點評"""
+    top_assets = validated.get("assets", [])[:10]
+    assets_info = []
+    for a in top_assets:
+        sig = signals.get(a["symbol"], {})
+        assets_info.append({
+            "symbol": a["symbol"],
+            "name": a.get("name", a["symbol"]),
+            "category": a.get("category", ""),
+            "value_twd": a.get("value_twd", 0),
+            "pct": a.get("pct", 0),
+            "change_24h_pct": sig.get("change_24h_pct"),
+        })
+
+    prompt = f"""以下是用戶持倉中市值最高的資產，請逐項點評：
+
+總資產（TWD）：{validated.get('total_twd', 0):,}
+資產列表：{json.dumps(assets_info, ensure_ascii=False)}"""
+
+    try:
+        raw = call_llm(_COMMENTARY_SYSTEM, prompt, max_tokens=2048, allow_paid=allow_paid)
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start == -1:
+            return []
+        return json.loads(raw[start:end])
+    except Exception:
+        return []
+
+
+_RETIREMENT_NARRATIVE_SYSTEM = """你是退休規劃顧問，請用繁體中文撰寫退休可行性分析。
+只輸出純文字段落（2~3 句），不要 JSON、不要標題、不要條列。
+聚焦：以目前資產與月支出，分析可持續性、最可能的提領情境、可行建議。"""
+
+
+def generate_retirement_narrative(
+    validated: dict,
+    monthly_income_twd: float,
+    goal_monthly_twd: float,
+    allow_paid: bool = True,
+) -> str:
+    """AI 產出退休敘事分析（2-3 句），利用耐久試算數據"""
+    retirement = validated.get("retirement", {})
+    drawdown = validated.get("drawdown")
+    drawdown_summary = ""
+    if drawdown:
+        for sc in drawdown.get("scenarios", []):
+            drawdown_summary += f"  {sc['label']}（年報酬 {sc['return_pct']}%）：可撐 {sc['years']} 年\n"
+
+    prompt = f"""用戶退休規劃現況：
+
+總資產（TWD）：{validated.get('total_twd', 0):,}
+每月生活費：NT$ {round(goal_monthly_twd):,}
+月收入：NT$ {round(monthly_income_twd):,}
+4% 法則月可提領：NT$ {retirement.get('monthly_4pct_twd', 0):,}
+退休目標達成率：{retirement.get('progress_pct', '未設定')}%
+耐久試算結果（通膨 2%/年）：
+{drawdown_summary if drawdown_summary else '無試算數據'}
+
+請分析此投資組合的退休可持續性、最可能出現的提領情境、以及一項可行建議。"""
+
+    try:
+        return call_llm(_RETIREMENT_NARRATIVE_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid).strip()
+    except Exception:
+        return ""
+
+
+_RISK_NARRATIVE_SYSTEM = """你是風險分析師，撰寫投資組合風險評估。請用繁體中文回答。
+只輸出純文字段落（2~4 句），不要 JSON、不要標題、不要條列。
+聚焦：資產集中風險、區域集中（美/台/日/加密）、幣別曝險、相關性風險、尾部風險。"""
+
+
+def generate_risk_narrative(
+    validated: dict,
+    signals: dict,
+    allow_paid: bool = True,
+) -> str:
+    """AI 產出風險敘事分析（2-4 句）"""
+    groups_str = json.dumps(validated.get("groups", []), ensure_ascii=False)
+    cats_str = json.dumps(validated.get("categories", []), ensure_ascii=False)
+    top3 = validated.get("assets", [])[:3]
+    top3_str = json.dumps(
+        [{"symbol": a["symbol"], "pct": a.get("pct", 0)} for a in top3],
+        ensure_ascii=False)
+
+    prompt = f"""用戶投資組合風險概況：
+
+總資產（TWD）：{validated.get('total_twd', 0):,}
+四大部位分布：{groups_str}
+子類別分布：{cats_str}
+前三大持倉（佔比）：{top3_str}
+市場訊號（24h漲跌/脫鉤）：{json.dumps(signals, ensure_ascii=False)}
+現有警示：{json.dumps(validated.get('alerts', []), ensure_ascii=False)}
+
+請分析組合層級的風險：資產集中、區域集中、幣別曝險、相關性風險、以及基於目前訊號的尾部風險。"""
+
+    try:
+        return call_llm(_RISK_NARRATIVE_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid).strip()
+    except Exception:
+        return ""
+
+
+_REALLOCATION_SYSTEM = """你是資產配置策略師。根據用戶的投資組合，為三種風險偏好提供再配置建議。請用繁體中文回答。
+只輸出 JSON，不要任何說明文字。
+
+輸出格式：
+{
+  "profiles": [
+    {
+      "name": "積極型",
+      "description": "追求高報酬，承受高波動",
+      "target_allocation": {"加密部位": 15, "股票部位": 55, "債券部位": 15, "現金部位": 15},
+      "regional_mix": {"美國": 40, "台灣": 25, "日本": 10, "加密貨幣": 15, "其他": 10},
+      "advice": "2-3 句具體建議"
+    },
+    {
+      "name": "穩健型",
+      "description": "平衡報酬與風險",
+      "target_allocation": {"加密部位": 10, "股票部位": 50, "債券部位": 25, "現金部位": 15},
+      "regional_mix": {"美國": 35, "台灣": 25, "日本": 15, "加密貨幣": 10, "其他": 15},
+      "advice": "2-3 句具體建議"
+    },
+    {
+      "name": "保守型",
+      "description": "重視資本保全與穩定現金流",
+      "target_allocation": {"加密部位": 5, "股票部位": 30, "債券部位": 40, "現金部位": 25},
+      "regional_mix": {"美國": 30, "台灣": 30, "日本": 15, "加密貨幣": 5, "其他": 20},
+      "advice": "2-3 句具體建議"
+    }
+  ],
+  "current_assessment": "1-2 句評估目前配置最接近哪種風格",
+  "regional_risk_note": "1-2 句關於地理集中風險"
+}
+
+target_allocation 各項加總必須 = 100，regional_mix 各項加總必須 = 100。
+advice 要具體提到用戶該如何調整（增減哪些部位、增減多少百分比）。"""
+
+
+def generate_reallocation_advice(
+    validated: dict,
+    signals: dict,
+    monthly_income_twd: float,
+    goal_monthly_twd: float,
+    allow_paid: bool = True,
+) -> dict:
+    """AI 產出三種風險偏好的再配置建議"""
+    groups_str = json.dumps(validated.get("groups", []), ensure_ascii=False)
+    cats_str = json.dumps(validated.get("categories", []), ensure_ascii=False)
+    retirement = validated.get("retirement", {})
+
+    prompt = f"""用戶投資組合現況：
+
+總資產（TWD）：{validated.get('total_twd', 0):,}
+四大部位分布（目前）：{groups_str}
+子類別分布（目前）：{cats_str}
+退休目標達成率：{retirement.get('progress_pct', '未設定')}%
+月收入：NT$ {round(monthly_income_twd):,}
+月生活費：NT$ {round(goal_monthly_twd):,}
+市場訊號：{json.dumps(signals, ensure_ascii=False)}
+
+請針對三種風險偏好（積極/穩健/保守），各提供建議的目標配置比例與區域配置比例，
+並具體說明用戶從目前配置要如何調整。同時評估目前配置最接近哪種風格。"""
+
+    try:
+        raw = call_llm(_REALLOCATION_SYSTEM, prompt, max_tokens=2048, allow_paid=allow_paid)
+        return _extract_json(raw)
+    except Exception:
+        return {}
+
+
+# ── K 線技術分析（依日線走勢給操作建議）──────────────
+
+_KLINE_SYSTEM = """你是技術分析師，根據近 90 日的日線 K 線資料提供操作建議。請用繁體中文回答。
+只輸出 JSON 陣列，不要任何說明文字。
+
+每筆資產輸出一個物件：
+[{
+  "symbol": "BTC",
+  "trend": "上升趨勢" | "下降趨勢" | "盤整" | "反彈中" | "回檔中",
+  "support": "估計支撐價位（原幣）",
+  "resistance": "估計壓力價位（原幣）",
+  "signal": "偏多" | "中性" | "偏空",
+  "analysis": "2~3 句技術面分析（趨勢、量能、關鍵價位、建議操作）"
+}]
+
+分析要點：
+- 觀察近期高低點判斷趨勢方向
+- 留意是否在支撐/壓力位附近
+- 近期是否有突破或跌破關鍵價位
+- 給出具體操作建議（持有/加碼/減碼/觀望）"""
+
+
+def generate_kline_analysis(
+    klines: dict,
+    assets_info: list[dict],
+    allow_paid: bool = True,
+) -> list[dict]:
+    """AI 依 K 線資料產出逐資產技術分析"""
+    if not klines:
+        return []
+
+    kline_summary = {}
+    for sym, candles in klines.items():
+        if not candles:
+            continue
+        recent = candles[-30:] if len(candles) > 30 else candles
+        closes = [c.get("c") or c.get("close", 0) for c in recent if c.get("c") or c.get("close")]
+        if not closes:
+            continue
+        highs = [c.get("h") or c.get("high", 0) for c in recent if c.get("h") or c.get("high")]
+        lows = [c.get("l") or c.get("low", 0) for c in recent if c.get("l") or c.get("low")]
+        asset = next((a for a in assets_info if a["symbol"] == sym), {})
+        kline_summary[sym] = {
+            "name": asset.get("name", sym),
+            "category": asset.get("category", ""),
+            "data_points": len(candles),
+            "recent_30d_high": round(max(highs), 2) if highs else None,
+            "recent_30d_low": round(min(lows), 2) if lows else None,
+            "latest_close": round(closes[-1], 2),
+            "first_close_30d": round(closes[0], 2),
+            "change_30d_pct": round((closes[-1] / closes[0] - 1) * 100, 1) if closes[0] else 0,
+        }
+
+    if not kline_summary:
+        return []
+
+    prompt = f"""以下是用戶持倉中有日線 K 線數據的資產（近 90 日），請逐項做技術分析：
+
+{json.dumps(kline_summary, ensure_ascii=False, indent=1)}
+
+請針對每項資產分析趨勢、支撐壓力、操作建議。"""
+
+    try:
+        raw = call_llm(_KLINE_SYSTEM, prompt, max_tokens=2048, allow_paid=allow_paid)
+        start = raw.find("[")
+        end = raw.rfind("]") + 1
+        if start == -1:
+            print(f"[kline_analysis] AI 回傳中找不到 JSON 陣列，raw[:200]={raw[:200]}")
+            return []
+        return json.loads(raw[start:end])
+    except Exception as e:
+        print(f"[kline_analysis] 例外: {e}")
+        return []
+
+
+# ── AI 風險警語 ──
+
+AI_DISCLAIMER = ("⚠️ AI 分析僅供參考，不構成投資建議。所有技術分析、操作建議與配置建議均由 AI 模型生成，"
+                 "可能存在錯誤或偏差。投資有風險，過往表現不代表未來收益。請依據個人風險承受能力與財務狀況，"
+                 "諮詢專業理財顧問後再做決策。本報告產生者不對任何投資損失負責。")
 
 
 # ── 資產耐久試算（確定性數學，首年提領後逐年通膨調整）──
@@ -556,14 +872,10 @@ def generate_portfolio_data(
     prices: dict,
     retirement_goal_monthly_twd: float = 0,
     monthly_income_twd: float = 0,
-    advice_model: str = "haiku",
+    allow_paid: bool = True,
 ) -> dict:
-    """
-    回傳可注入 HTML 模板的 PORTFOLIO_DATA dict。
-    advice_model：操作建議使用的模型（"haiku" 預設 / "sonnet" 品質較佳）
-    """
-    # Haiku 只負責 note 標註與退休短評；所有數字由下方純 Python 計算
-    summary   = step1_haiku_summarize(assets, prices)
+    """回傳可注入 HTML 模板的 PORTFOLIO_DATA dict。"""
+    summary   = step1_haiku_summarize(assets, prices, allow_paid=allow_paid)
     validated = summary
 
     # ── 數字全部由程式碼決定，不信任模型輸出 ──
@@ -639,55 +951,7 @@ def generate_portfolio_data(
     validated["memes"] = _pick_memes(
         validated["alerts"], progress_pct, signals, crypto_pct, used_memes)
 
-    # 三個獨立 AI 呼叫平行執行（建議 / 新聞精選 / 花費規劃），縮短總延遲
-    from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=3) as pool:
-        fut_recs = pool.submit(
-            generate_recommendations,
-            validated, signals, monthly_income_twd, retirement_goal_monthly_twd,
-            advice_model)
-        fut_news = pool.submit(select_news, prices.get("news_raw", []))
-        fut_plan = pool.submit(
-            generate_spending_plan,
-            retirement_goal_monthly_twd, monthly_income_twd)
-        recs      = fut_recs.result()
-        news      = fut_news.result()
-        plan      = fut_plan.result()
-    REC_MEMES = {
-        "減碼":   ("unhealthy.jpg", "對健康不好喔"),
-        "加碼":   ("pump.jpg",      "現在正是復權的時刻"),
-        "不動":   ("grind1.jpg",    "我還是會繼續下去"),
-        "觀察":   ("neutral2.jpg",  "是這樣沒錯，但不是這樣"),
-        "再平衡": ("flipflop.jpg",  "昨天還很喜歡，今天就膩了"),
-    }
-    seen_actions: set[str] = set()
-    meme_count = 0
-    for r in recs:
-        action = r.get("action", "")
-        if action in seen_actions or action not in REC_MEMES or meme_count >= 3:
-            continue
-        seen_actions.add(action)
-        filename, caption = REC_MEMES[action]
-        try:
-            with open(os.path.join(MEME_DIR, filename), "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-            r["meme"] = {"caption": caption,
-                         "data_uri": f"data:image/jpeg;base64,{b64}"}
-            used_memes.add(filename)
-            meme_count += 1
-        except Exception:
-            pass
-    validated["recommendations"] = recs
-
-    # 持倉相關新聞（平行結果）
-    validated["news"] = news
-
-    # 花費規劃（平行結果，納入月收入）
-    if plan is not None:
-        plan["monthly_income_twd"] = round(monthly_income_twd)
-    validated["spending_plan"] = plan
-
-    # 資產耐久試算（首年提領 = 月花費×12，逐年通膨 2% 調整）
+    # 資產耐久試算（提前計算，讓退休敘事 AI 能使用結果）
     drawdown = simulate_drawdown(total_twd, retirement_goal_monthly_twd)
     if drawdown:
         # 三情境固定台詞：
@@ -713,8 +977,62 @@ def generate_portfolio_data(
                 pass
     validated["drawdown"] = drawdown
 
+    # 八個獨立 AI 呼叫平行執行，縮短總延遲
+    klines = prices.get("klines", {})
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        fut_news = pool.submit(select_news, prices.get("news_raw", []), allow_paid)
+        fut_plan = pool.submit(
+            generate_spending_plan,
+            retirement_goal_monthly_twd, monthly_income_twd, allow_paid)
+        fut_summary = pool.submit(
+            generate_portfolio_summary,
+            validated, signals, monthly_income_twd, retirement_goal_monthly_twd,
+            allow_paid)
+        fut_commentary = pool.submit(
+            generate_asset_commentary,
+            validated, signals, allow_paid)
+        fut_retirement = pool.submit(
+            generate_retirement_narrative,
+            validated, monthly_income_twd, retirement_goal_monthly_twd,
+            allow_paid)
+        fut_risk = pool.submit(
+            generate_risk_narrative,
+            validated, signals, allow_paid)
+        fut_realloc = pool.submit(
+            generate_reallocation_advice,
+            validated, signals, monthly_income_twd, retirement_goal_monthly_twd,
+            allow_paid)
+        fut_kline = pool.submit(
+            generate_kline_analysis,
+            klines, validated.get("assets", []), allow_paid)
+        news      = fut_news.result()
+        plan      = fut_plan.result()
+        summary_result       = fut_summary.result()
+        commentary_result    = fut_commentary.result()
+        retirement_narrative = fut_retirement.result()
+        risk_narrative       = fut_risk.result()
+        reallocation_result  = fut_realloc.result()
+        kline_analysis       = fut_kline.result()
+    # 持倉相關新聞（平行結果）
+    validated["news"] = news
+
+    # 花費規劃（平行結果，納入月收入）
+    if plan is not None:
+        plan["monthly_income_twd"] = round(monthly_income_twd)
+    validated["spending_plan"] = plan
+
+    # AI 深度分析結果（平行結果）
+    validated["ai_summary"] = summary_result
+    validated["asset_commentary"] = commentary_result
+    validated["retirement_narrative"] = retirement_narrative
+    validated["risk_narrative"] = risk_narrative
+    validated["reallocation"] = reallocation_result
+    validated["kline_analysis"] = kline_analysis
+    validated["ai_disclaimer"] = AI_DISCLAIMER
+
     # 波動資產日線 K 線（近 90 日，模板渲染蠟燭圖）
-    validated["klines"] = prices.get("klines", {})
+    validated["klines"] = klines
 
     # 產生時間（台北時間）
     taipei = timezone(timedelta(hours=8))

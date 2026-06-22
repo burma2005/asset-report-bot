@@ -112,6 +112,21 @@
     .status-msg.error { color: var(--red); }
     .status-msg.success { color: var(--green); }
 
+    /* ── Progress bar ── */
+    .progress-wrap { display: none; max-width: 480px; margin: 16px auto 0; }
+    .progress-track {
+      height: 6px; border-radius: 99px; background: var(--surface2);
+      overflow: hidden; margin-bottom: 8px;
+    }
+    .progress-fill {
+      height: 100%; border-radius: 99px; background: var(--accent);
+      width: 0%; transition: width 0.5s ease;
+    }
+    .progress-step {
+      font-size: 0.8rem; color: var(--text-muted); text-align: center;
+      min-height: 1.2em;
+    }
+
     /* ── Toast ── */
     .toast {
       position: fixed; bottom: 24px; right: 24px;
@@ -123,7 +138,31 @@
     .toast.show { opacity: 1; }
     .toast.success { border-color: var(--green); }
     .toast.error   { border-color: var(--red); }
+
+    /* ── Auth bar ── */
+    .auth-bar {
+      display: flex; align-items: center; justify-content: flex-end;
+      gap: 12px; margin-bottom: 16px; padding: 10px 16px;
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius); font-size: 0.85rem;
+    }
+    .auth-bar .user-info { color: var(--text-muted); }
+    .auth-bar .user-email { color: var(--accent); font-weight: 600; }
+    .auth-bar .user-tier {
+      padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700;
+    }
+    .tier-admin   { background: #f0c55b22; color: var(--yellow); border: 1px solid var(--yellow); }
+    .tier-invited { background: #34c78a22; color: var(--green); border: 1px solid var(--green); }
+    .tier-general { background: #5b8ef022; color: var(--accent); border: 1px solid var(--accent); }
+    .auth-bar button {
+      padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+      background: var(--surface2); color: var(--text-muted); cursor: pointer;
+      font-size: 0.8rem; transition: all 0.15s;
+    }
+    .auth-bar button:hover { border-color: var(--red); color: var(--red); }
+    #google-signin-btn { min-height: 40px; }
   </style>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
 <body>
 
@@ -132,7 +171,15 @@
   <p>填入你的資產持有明細，點擊「產生報告」自動查詢即時報價並輸出 HTML 報告</p>
 </div>
 
-<!-- 端點與金鑰已內建（見下方 JS 常數），不需手動設定 -->
+<!-- ── 登入狀態列 ── -->
+<div class="auth-bar">
+  <div id="google-signin-btn"></div>
+  <div id="user-info-display" style="display:none;">
+    <span class="user-info">已登入：<span class="user-email" id="user-email-display"></span></span>
+    <span class="user-tier" id="user-tier-display"></span>
+    <button onclick="signOut()">登出</button>
+  </div>
+</div>
 
 <!-- ── Tabs ── -->
 <div class="tabs">
@@ -295,6 +342,10 @@
 <div class="submit-wrap">
   <button class="submit-btn" id="submit-btn" onclick="submitReport()">📊 產生報告</button>
   <div class="status-msg" id="status-msg"></div>
+  <div class="progress-wrap" id="progress-wrap">
+    <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+    <div class="progress-step" id="progress-step"></div>
+  </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -348,8 +399,47 @@
 // 後端設定（sam deploy 後填入你自己的值）
 // 建議：複製本檔為 index.local.html（已 gitignore）再填，避免誤 push 金鑰
 // ════════════════════════════════════════
-const LAMBDA_ENDPOINT = '__YOUR_LAMBDA_FUNCTION_URL__';   // 例：https://xxxx.lambda-url.ap-northeast-1.on.aws/
-const API_KEY = '__YOUR_API_KEY__';                        // 與 samconfig.toml 的 ApiKeyParam 相同
+const LAMBDA_ENDPOINT = '__YOUR_LAMBDA_FUNCTION_URL__';
+const GOOGLE_CLIENT_ID = '__YOUR_GOOGLE_CLIENT_ID__';
+
+// ════════════════════════════════════════
+// Google Identity Services 登入
+// ════════════════════════════════════════
+let g_id_token = null;
+let g_user_email = null;
+
+function handleGoogleCredentialResponse(response) {
+  g_id_token = response.credential;
+  const payload = JSON.parse(atob(g_id_token.split('.')[1]));
+  g_user_email = payload.email;
+  document.getElementById('google-signin-btn').style.display = 'none';
+  document.getElementById('user-info-display').style.display = 'flex';
+  document.getElementById('user-email-display').textContent = g_user_email;
+  document.getElementById('user-tier-display').textContent = '';
+  document.getElementById('submit-btn').disabled = false;
+}
+
+function signOut() {
+  g_id_token = null;
+  g_user_email = null;
+  document.getElementById('google-signin-btn').style.display = '';
+  document.getElementById('user-info-display').style.display = 'none';
+  document.getElementById('submit-btn').disabled = true;
+  google.accounts.id.disableAutoSelect();
+}
+
+window.addEventListener('load', () => {
+  google.accounts.id.initialize({
+    client_id: GOOGLE_CLIENT_ID,
+    callback: handleGoogleCredentialResponse,
+    auto_select: true,
+  });
+  google.accounts.id.renderButton(
+    document.getElementById('google-signin-btn'),
+    { theme: 'filled_black', size: 'medium', text: 'signin_with', locale: 'zh-TW' }
+  );
+  document.getElementById('submit-btn').disabled = true;
+});
 
 // ════════════════════════════════════════
 // 預設空白列（placeholder 為範例，不假設使用者持有任何資產）
@@ -607,7 +697,62 @@ function loadDefaults() {
 // 送出 → Lambda
 // ════════════════════════════════════════
 
+const PROGRESS_STEPS = [
+  { pct: 5,  text: '🔐 驗證登入身份…' },
+  { pct: 12, text: '📡 連線 Binance / Yahoo Finance 抓取即時報價…' },
+  { pct: 25, text: '💱 換算匯率，計算各資產新台幣市值…' },
+  { pct: 35, text: '📊 繪製 K 線走勢圖（近 90 日）…' },
+  { pct: 45, text: '🤖 AI 分析投資組合健康度…' },
+  { pct: 52, text: '🤖 AI 逐筆資產點評…' },
+  { pct: 58, text: '🤖 AI 風險評估與技術分析…' },
+  { pct: 65, text: '🤖 AI 產出資產再配置建議（積極/穩健/保守）…' },
+  { pct: 72, text: '🤖 AI 退休可行性分析…' },
+  { pct: 78, text: '📰 篩選持倉相關新聞…' },
+  { pct: 84, text: '💰 花費規劃與退休耐久試算…' },
+  { pct: 90, text: '🎨 組裝報告頁面與梗圖…' },
+  { pct: 95, text: '📄 最終檢查，即將完成…' },
+];
+let progressTimer = null;
+function startProgress() {
+  const wrap = document.getElementById('progress-wrap');
+  const fill = document.getElementById('progress-fill');
+  const step = document.getElementById('progress-step');
+  wrap.style.display = 'block';
+  fill.style.width = '0%';
+  step.textContent = '';
+  let idx = 0;
+  function tick() {
+    if (idx >= PROGRESS_STEPS.length) return;
+    const s = PROGRESS_STEPS[idx];
+    fill.style.width = s.pct + '%';
+    step.textContent = s.text;
+    idx++;
+    const delay = idx <= 4 ? 12000 + Math.random() * 3000
+                : idx <= 10 ? 10000 + Math.random() * 3000
+                : 6000 + Math.random() * 2000;
+    progressTimer = setTimeout(tick, delay);
+  }
+  progressTimer = setTimeout(tick, 800);
+}
+function stopProgress(success) {
+  clearTimeout(progressTimer);
+  const fill = document.getElementById('progress-fill');
+  const step = document.getElementById('progress-step');
+  fill.style.width = '100%';
+  fill.style.background = success ? 'var(--green)' : 'var(--red)';
+  step.textContent = success ? '✅ 完成！' : '❌ 失敗';
+  setTimeout(() => {
+    document.getElementById('progress-wrap').style.display = 'none';
+    fill.style.background = 'var(--accent)';
+  }, 3000);
+}
+
 async function submitReport() {
+  if (!g_id_token) {
+    showStatus('請先使用 Google 帳號登入', 'error');
+    return;
+  }
+
   const assets = collectAssets();
   if (Object.keys(assets).length === 0) {
     showStatus('請至少填入一筆資產', 'error');
@@ -616,18 +761,21 @@ async function submitReport() {
 
   const btn = document.getElementById('submit-btn');
   btn.disabled = true;
-  showStatus('⏳ 正在查詢即時報價並產生報告，約需 2 分鐘，請耐心等候…');
+  showStatus('');
+  startProgress();
   save();
 
-  // 前端逾時保護：超過 3 分鐘自動中止並提示重試
   const controller = new AbortController();
-  const timeoutId  = setTimeout(() => controller.abort(), 180000);
+  const timeoutId  = setTimeout(() => controller.abort(), 300000);
   try {
     const goalWan   = parseFloat(document.getElementById('retire-goal').value) || 0;
     const incomeWan = parseFloat(document.getElementById('monthly-income').value) || 0;
     const resp = await fetch(LAMBDA_ENDPOINT, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Api-Key': API_KEY },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${g_id_token}`,
+      },
       body: JSON.stringify({
         assets,
         retirement_goal_monthly_twd: goalWan * 10000,
@@ -638,7 +786,13 @@ async function submitReport() {
 
     if (!resp.ok) {
       const errText = await resp.text();
-      throw new Error(`Lambda 回傳錯誤 ${resp.status}: ${errText}`);
+      try {
+        const errJson = JSON.parse(errText);
+        throw new Error(errJson.error || `Lambda 回傳錯誤 ${resp.status}`);
+      } catch (parseErr) {
+        if (parseErr.message.includes('Lambda')) throw parseErr;
+        throw new Error(`Lambda 回傳錯誤 ${resp.status}: ${errText}`);
+      }
     }
 
     const contentType = resp.headers.get('Content-Type') || '';
@@ -651,7 +805,6 @@ async function submitReport() {
       htmlContent = await resp.text();
     }
 
-    // 觸發下載
     const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -660,12 +813,14 @@ async function submitReport() {
     a.click();
     URL.revokeObjectURL(url);
 
+    stopProgress(true);
     showStatus('✅ 報告已下載，請用瀏覽器開啟！', 'success');
     showToast('✅ 報告產生完成！', 'success');
 
   } catch (err) {
+    stopProgress(false);
     const msg = err.name === 'AbortError'
-      ? '處理逾時（超過 3 分鐘），請重試'
+      ? '處理逾時（超過 5 分鐘），請重試'
       : err.message;
     showStatus(`❌ ${msg}`, 'error');
     showToast(`❌ 錯誤：${msg}`, 'error');
