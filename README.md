@@ -1,7 +1,8 @@
 # Asset Report Bot — 無伺服器資產報告產生器
 
 填入持倉 → 一鍵產出含即時報價、日線 K 圖、配置圖表、退休試算、風險示警與梗圖的 HTML 報告。
-全無伺服器（AWS Lambda），閒置零成本，預設 Haiku 模式每次約 **NT$ 0.5**。
+全無伺服器（AWS Lambda），閒置零成本。AI 採 **OpenRouter 免費模型競速 + 付費兜底**——
+每份報告平常 **$0**（免費模型搶贏），僅免費全限速時才用付費模型兜底（每份約 NT$0.03）。
 
 > 📊 **範例報告**：[線上預覽](https://htmlpreview.github.io/?https://github.com/burma2005/asset-report-bot/blob/main/docs/sample_report.html)
 > ｜[下載 docs/sample_report.html](docs/sample_report.html)（範例數據，非真實持倉）
@@ -33,13 +34,13 @@ flowchart LR
         FK["Frankfurter<br/>匯率"]
     end
 
-    subgraph AI["🤖 Amazon Bedrock"]
-        HK["Haiku 4.5<br/>彙整・新聞・建議"]
-        SN["Sonnet 4.6<br/>建議（可選）"]
+    subgraph AI["🤖 OpenRouter"]
+        R1["免費競速<br/>gpt-oss-120b + gemma-4-31b"]
+        R2["付費兜底<br/>gemma-4-31b（限速時）"]
     end
 
     LB <--> BN & YF & FK
-    LB <--> HK & SN
+    LB <--> R1 --> R2
 ```
 
 ---
@@ -47,7 +48,7 @@ flowchart LR
 ## 如何觸發 Lambda
 
 1. 瀏覽器開啟 `index.html`（本地檔案，無需伺服器）
-2. 填入資產（加密貨幣／美股／台股／日股／美債／現金六個分頁）、每月生活費、月收入
+2. 填入資產（加密貨幣／美股／台股／日股／美債／現金／其他資產七個分頁）、每月生活費、月收入
 3. 點「📊 產生報告」→ 前端發出：
 
 ```
@@ -63,16 +64,16 @@ Body:
   }
 ```
 
-4. 30~60 秒後 Lambda 回傳完整 HTML，瀏覽器自動觸發下載
+4. 約 1~2 分鐘後 Lambda 回傳完整 HTML，瀏覽器自動觸發下載（免費模型競速，速度視限速狀況浮動）
 
 ## 驗證機制
 
 | 層級 | 機制 |
 |------|------|
 | 請求驗證 | 自訂 `X-Api-Key` 標頭，Lambda 第一步比對環境變數 `API_KEY`，不符回 401（不執行任何抓價/AI 呼叫，不產生費用） |
-| 金鑰存放 | 部署時經 CloudFormation `NoEcho` 參數注入；本地端寫在 index.html（檔案不離開使用者電腦） |
+| 金鑰存放 | 部署時經 CloudFormation `NoEcho` 參數注入；本地端寫在 index.local.html（檔案不離開使用者電腦） |
 | CORS | 由 Lambda Function URL 服務層統一處理（程式內不得重複加標頭，否則瀏覽器拒收） |
-| AWS 授權 | Lambda IAM Role 僅授權 `bedrock:InvokeModel`，最小權限 |
+| AI 金鑰 | OpenRouter 金鑰經 `NoEcho` 參數 → 環境變數注入；Lambda 不需特殊 IAM（AI 改由 OpenRouter HTTPS 外呼） |
 
 ## Lambda 工作流
 
@@ -82,7 +83,7 @@ sequenceDiagram
     participant U as index.html
     participant L as Lambda
     participant API as 官方 API
-    participant AI as Bedrock
+    participant AI as OpenRouter
 
     U->>L: POST（X-Api-Key + assets）
     L->>L: ① 驗證 Key（失敗→401）
@@ -91,12 +92,12 @@ sequenceDiagram
         L->>API: Yahoo 股價+新聞+K線
         L->>API: Frankfurter 匯率
     end
-    L->>AI: ② Haiku 標註 note
+    L->>AI: ② AI 標註 note（免費競速→付費兜底）
     L->>L: ③ 純 Python 計算<br/>市值/占比/排序/退休/耐久/示警/梗圖
     par 並行 AI
-        L->>AI: ④a 操作建議（Haiku 或 Sonnet，前端選）
-        L->>AI: ④b Haiku 新聞精選
-        L->>AI: ④c Haiku 花費規劃
+        L->>AI: ④a 操作建議
+        L->>AI: ④b 新聞精選
+        L->>AI: ④c 花費規劃
     end
     L->>L: ⑤ 注入模板（梗圖+K線內嵌）
     L-->>U: 200 + HTML（~800KB）
@@ -108,31 +109,35 @@ sequenceDiagram
 |------|--------|------|
 | 報價/匯率/K線抓取、市值與占比計算 | 純 Python | 數字不容 AI 幻覺 |
 | 排序、類別彙總、退休進度、耐久試算、異常示警 | 純 Python | 同上 |
-| note 標註（活期鎖定、殖利率等） | Haiku | 純文字標籤 |
-| 操作建議 | Haiku（預設）或 Sonnet（前端選） | 諮詢性質內容 |
-| 花費規劃、新聞精選 | Haiku | 諮詢性質內容 |
+| note 標註（活期鎖定、殖利率等） | OpenRouter AI | 純文字標籤 |
+| 操作建議 | OpenRouter AI | 諮詢性質內容 |
+| 花費規劃、新聞精選 | OpenRouter AI | 諮詢性質內容 |
 | 梗圖選擇 | 純 Python 規則 | 依訊號/進度確定性對應 |
 
-## 調用的模型
+## 調用的模型（OpenRouter）
 
-| 模型 | Bedrock Model ID | 用途 | 每次費用 |
-|------|-----------------|------|---------|
-| Claude Haiku 4.5 | `jp.anthropic.claude-haiku-4-5-20251001-v1:0` | note 標註、新聞精選、花費規劃、操作建議（預設） | ~$0.012 |
-| Claude Sonnet 4.6 | `jp.anthropic.claude-sonnet-4-6` | 操作建議（前端可選，分析較深入） | +$0.018 |
+每個 AI 呼叫採「**免費競速 → 付費兜底**」策略，由環境變數控制、免改碼可調：
 
-> 預設部署於東京區並使用 `jp.` 推理檔；**Region 由使用者自行決定**——改 `samconfig.toml` 的 `region`
-> 與 `template.yaml` 的 `BEDROCK_*_MODEL` 前綴（如 `us.` / `apac.` / `global.`）即可。
-> Lambda 以 IAM Role 授權，**無需 Anthropic API Key**。
+| 階段 | 模型 | 機制 | 費用 |
+|------|------|------|------|
+| 競速（免費） | `openai/gpt-oss-120b:free` + `google/gemma-4-31b-it:free` | 同時發請求，誰先成功用誰 | **$0** |
+| 兜底（付費） | `google/gemma-4-31b-it` | 免費全限速/逾時才呼叫，保證有結果 | ~$0.028/份 |
+
+- 模型鏈由 `OPENROUTER_RACE_MODELS`（競速）與 `OPENROUTER_MODELS`（兜底）兩個環境變數控制
+- OpenRouter 金鑰只進 `samconfig.toml`（雲端）或 `env.json`（本地），兩者皆 gitignore
+- Lambda **無需 Anthropic / AWS Bedrock 權限**，AI 全經 OpenRouter HTTPS 外呼
+
+> 所有數字（市值/占比/退休/耐久試算）由純 Python 計算，**不信任 AI 輸出的數字**；AI 僅負責質化文字（建議/新聞/花費評語/note）。
 
 ## 報告內容
 
 1. **總覽**：總資產 TWD、產生時間（台北時區）
-2. **七子類別 KPI 卡**：鏈上現金／鏈下現金／加密部位／台股／日股／美股／債券
+2. **子類別 KPI 卡**：鏈上現金／鏈下現金／加密部位／台股／日股／美股／債券／其他（依實際持有產生）
 3. **資產配置比例圖**：深色卡片＋編號圖例（持有數量 × 原幣報價｜來源｜TWD 市值），占比由高至低
 4. **四大部位圖**：現金／加密／股票／債券
 5. **波動資產日線 K 圖**：近 90 日蠟燭圖（Binance/Yahoo 官方 K 線數據）
 6. **風險示警**：穩定幣脫鉤（±0.5%/±3%）、24h 暴跌（加密 -5%/-10%、股票 -4%/-7%）、查無報價提醒
-6. **持倉相關新聞**：Yahoo 官方新聞 API → Haiku 精選 1~3 則（可點擊原文）
+6. **持倉相關新聞**：Yahoo 官方新聞 API → AI 精選 1~3 則（可點擊原文）
 7. **操作建議**：加碼/減碼/不動/觀察/再平衡 + 理由（納入月收入與退休狀態）
 8. **資產明細表**：數量、原幣報價、來源標籤、TWD 市值、占比條
 9. **退休試算**：4% 法則 + 目標進度條（所需資產 = 月生活費 × 300）
@@ -140,47 +145,39 @@ sequenceDiagram
 11. **資產耐久試算**：首年提領 = 月花費×12，逐年通膨 +2%，三情境（3%/5%/7% 報酬）可撐年數 + 逐年明細表
 12. **梗圖**：依市場情緒/配置健康/退休進度/建議動作，嵌入對應段落（base64 內嵌，離線可看）
 
-## AWS 定價試算
+## 定價試算
 
-> 以東京區（ap-northeast-1）2026 年牌價估算，實際以 AWS 帳單為準。
+> 以東京區（ap-northeast-1）2026 年牌價估算，實際以帳單為準。
 
-### 每次產生報告的成本拆解（預設 Haiku 模式）
+### 每次產生報告的成本拆解
 
 | 項目 | 用量 | 單價 | 小計（USD） |
 |------|------|------|------------|
-| Lambda 運算 | ARM64 512MB × ~17s | $0.0000133/GB-s | $0.0001 |
+| Lambda 運算 | ARM64 512MB × ~30s | $0.0000133/GB-s | ~$0.0002 |
 | Lambda 請求 + Function URL | 1 次 | 近乎免費 | ~$0 |
-| Bedrock Haiku 4.5 ×4（標註+新聞+規劃+建議）| ~6K in / 3K out tokens | $1 / $5 per MTok | ~$0.012 |
+| AI（免費競速搶贏時） | 4 次免費模型呼叫 | $0 | **$0** |
+| AI（免費全限速 → 付費兜底） | 4 次 gemma-4-31b 付費 | $0.12 / $0.35 per MTok | ~$0.0009 |
 | 回傳流量 | ~0.8 MB | $0.114/GB | ~$0 |
-| **每次合計（Haiku 模式）** | | | **~$0.015（≈ NT$ 0.5）** |
-| 改選 Sonnet 操作建議 | +1 次 Sonnet 呼叫 | $3 / $15 per MTok | +$0.018（合計 ≈ NT$ 1）|
+| **每次合計** | | | **~$0（平常）～ NT$0.03（兜底）** |
 
-### 月費情境（預設 Haiku 模式）
+### 與原 AWS Bedrock 方案對比
 
-| 使用頻率 | 月報告數 | 月費（USD） | 月費（TWD） |
-|---------|---------|------------|------------|
-| 每週 1 次 | 4 | **$0.06** | ~NT$ 2 |
-| 每日 1 次 | 30 | **$0.45** | ~NT$ 15 |
-| 每日 3 次 | 90 | **$1.35** | ~NT$ 44 |
+| 方案 | 每份成本 | 備註 |
+|------|---------|------|
+| **OpenRouter 免費競速 + 付費兜底（現行）** | **$0 ～ NT$0.03** | 平常零成本，免費全限速才付費兜底 |
+| 原 Bedrock Claude Haiku 4.5 | ~NT$0.31 | 按 token 計費，每份都收 |
 
-### 與常駐方案對比
-
-| 方案 | 月費 | 備註 |
-|------|------|------|
-| **本專案（Serverless）** | **$0.3 ~ $7** | 閒置零成本，用多少付多少 |
-| EC2 t4g.small 常駐 + n8n | ~$12 + AI 費用 | 24/7 計費，閒置也燒錢 |
-| n8n Cloud + 外部 LLM API | $20 起 | 執行次數另有上限 |
-
-> 操作建議的模型（Haiku/Sonnet）可在輸入頁直接選擇，預設 Haiku。
+> 免費模型每日 1000 次額度（每份 4 呼叫 ≈ 250 份/天）；超額或限速時自動掉到付費兜底，
+> 不影響出報告。OpenRouter 帳上 $10 額度，純走付費兜底也可跑 **約 1 萬份**。
 
 ## 部署
 
 詳見 [DEPLOYMENT.md](DEPLOYMENT.md)（**Agent 部署 SOP**：寫給 AI Agent 執行，人類只需四個介入點）。摘要：
 
 ```powershell
-# 前置：aws login（瀏覽器授權）+ Bedrock Model Access 啟用兩個 Claude 模型
+# 前置：aws login（瀏覽器授權）+ OpenRouter 金鑰（https://openrouter.ai/keys）
 sam build
-sam deploy   # 輸出 ReportEndpointUrl → 寫入 index.html 的 LAMBDA_ENDPOINT
+sam deploy   # 輸出 ReportEndpointUrl → 寫入 index.local.html 的 LAMBDA_ENDPOINT
 ```
 
 ## 專案結構
@@ -189,13 +186,15 @@ sam deploy   # 輸出 ReportEndpointUrl → 寫入 index.html 的 LAMBDA_ENDPOIN
 asset-report-bot/
 ├── index.html                    # 本地輸入頁範本（端點/金鑰為佔位符）
 ├── index.local.html              # 個人實際使用版（真實端點+金鑰，已 gitignore）
-├── template.yaml                 # AWS SAM（Lambda + Function URL + IAM）
+├── template.yaml                 # AWS SAM（Lambda + Function URL）
 ├── samconfig.toml.example        # 部署設定範本（複製為 samconfig.toml 後填金鑰）
+├── env.json                      # 本地測試環境變數（含 OpenRouter 金鑰，已 gitignore）
 ├── DEPLOYMENT.md                 # Agent 部署 SOP
 └── src/generate_report/          # Lambda 程式（sam build 打包整個目錄）
     ├── app.py                    # 入口：API Key 驗證 → 工作流 → 回傳 HTML
-    ├── price_fetcher.py          # 並行抓價/匯率/新聞（純 Python）
-    ├── claude_agent.py           # Bedrock 雙模型 + 確定性計算 + 梗圖引擎
+    ├── price_fetcher.py          # 並行抓價/匯率/新聞（純 Python；台股 .TW→.TWO 自動補救）
+    ├── openrouter_client.py      # OpenRouter 呼叫：免費競速 + 付費兜底
+    ├── claude_agent.py           # AI 質化文字 + 確定性計算 + 梗圖引擎
     ├── report_template.html      # 報告 HTML 模板（單一真相來源）
     └── memes/                    # 23 張情境梗圖（base64 內嵌報告）
 ```

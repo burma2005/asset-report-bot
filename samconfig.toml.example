@@ -6,6 +6,8 @@ region = "ap-northeast-1"
 confirm_changeset = false
 capabilities = "CAPABILITY_IAM"
 resolve_s3 = true
-# 產生方式（PowerShell）：
+# ApiKeyParam 產生方式（PowerShell）：
 #   $rng=[System.Security.Cryptography.RNGCryptoServiceProvider]::new();$b=New-Object byte[] 32;$rng.GetBytes($b);([Convert]::ToBase64String($b) -replace '[+/=]','').Substring(0,40)
-parameter_overrides = "ApiKeyParam=<你的40字元隨機金鑰>"
+# OpenRouterKeyParam：到 https://openrouter.ai/keys 申請（sk-or-... 開頭），用免費模型成本 $0
+# 兩個 override 以空白分隔，整行用雙引號包住
+parameter_overrides = "ApiKeyParam=<你的40字元隨機金鑰> OpenRouterKeyParam=<你的OpenRouter金鑰>"

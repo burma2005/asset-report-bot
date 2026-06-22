@@ -59,10 +59,10 @@ async def fetch_binance_prices(
 
 # ── 股票（Yahoo Finance chart API，純 httpx 不依賴 yfinance）──
 
-async def _fetch_yahoo_one(client: httpx.AsyncClient, symbol: str) -> dict | None:
+async def _yahoo_chart(client: httpx.AsyncClient, sym: str) -> dict | None:
     try:
         resp = await client.get(
-            f"https://query1.finance.yahoo.com/v8/finance/chart/{symbol.upper()}",
+            f"https://query1.finance.yahoo.com/v8/finance/chart/{sym}",
             params={"range": "1d", "interval": "1d"},
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=8,
@@ -77,6 +77,16 @@ async def _fetch_yahoo_one(client: httpx.AsyncClient, symbol: str) -> dict | Non
         return {"price": float(price), "change_24h_pct": change}
     except Exception:
         return None
+
+
+async def _fetch_yahoo_one(client: httpx.AsyncClient, symbol: str) -> dict | None:
+    sym  = symbol.upper()
+    data = await _yahoo_chart(client, sym)
+    # 上市(.TW)查無 → 自動改試上櫃(.TWO)。用戶輸入 6163 被補成 .TW，
+    # 但華電網等上櫃股 Yahoo 後綴是 .TWO，這裡自動補救免得誤判查無報價。
+    if data is None and sym.endswith(".TW") and not sym.endswith(".TWO"):
+        data = await _yahoo_chart(client, sym[:-3] + ".TWO")
+    return data
 
 
 async def fetch_yahoo_prices(
@@ -113,6 +123,15 @@ async def _fetch_binance_klines(client: httpx.AsyncClient, sym: str) -> list | N
 
 
 async def _fetch_yahoo_klines(client: httpx.AsyncClient, sym: str) -> list | None:
+    """K 線抓取：上市(.TW)查無 → 自動改試上櫃(.TWO)，與報價抓取一致。"""
+    s = sym.upper()
+    data = await _yahoo_klines_raw(client, s)
+    if data is None and s.endswith(".TW") and not s.endswith(".TWO"):
+        data = await _yahoo_klines_raw(client, s[:-3] + ".TWO")
+    return data
+
+
+async def _yahoo_klines_raw(client: httpx.AsyncClient, sym: str) -> list | None:
     """日線 OHLC，一律使用還原價（adjusted）——
     以 adjclose/close 比例縮放整組 OHLC，消除分割/配息造成的假斷崖
     （例：1306.T 曾分割，未還原會顯示崩盤式跳空）"""
@@ -285,7 +304,11 @@ async def fetch_all_prices(assets: dict) -> dict:
     for sym in binance_syms:
         info = binance_px.get(sym) if not isinstance(binance_px, Exception) else None
         is_stable = sym.upper() in STABLE_USD
-        if info is None:
+        manual = assets[sym].get("price_usd")   # 未上幣安的小幣可手動填 USD 報價
+        if manual:
+            p = float(manual)
+            chg = None
+        elif info is None:
             p = 1.0 if is_stable else None
             chg = None
         else:
@@ -352,6 +375,20 @@ async def fetch_all_prices(assets: dict) -> dict:
         rate = {"TWD": 1.0, "USD": usd_twd, "JPY": jpy_twd}.get(ccy, 1.0)
         prices_native[sym] = rate
         prices_twd[sym]    = rate
+
+    # 其他資產：完全由使用者提供單價與幣別，不查 API
+    for sym, data in assets.items():
+        if data.get("api") != "other":
+            continue
+        ccy = data.get("currency", "TWD")
+        px  = data.get("price")
+        if px:
+            rate = {"TWD": 1.0, "USD": usd_twd, "JPY": jpy_twd}.get(ccy, 1.0)
+            prices_native[sym] = float(px)
+            prices_twd[sym]    = float(px) * rate
+        else:
+            prices_native[sym] = None
+            prices_twd[sym]    = None
 
     return {
         "prices_native": prices_native,

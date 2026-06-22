@@ -553,12 +553,14 @@ const CAT_COLOR = {
   '台股': '#34d399', '美股': '#fbbf24', '日股': '#fb7185', '港股': '#c084fc',
   '債券': '#7c3aed', '美債': '#7c3aed',
   '現金部位': '#8892a4', '股票部位': '#16a34a', '債券部位': '#7c3aed',
+  '其他': '#94a3b8', '其他部位': '#94a3b8',
 };
 const CAT_CLASS = {
   '鏈上現金': 'cat-crypto', '鏈下現金': 'cat-cash',
   '加密部位': 'cat-crypto', '加密貨幣': 'cat-crypto',
   '台股': 'cat-tw', '美股': 'cat-us', '日股': 'cat-jp',
   '債券': 'cat-bond', '美債': 'cat-bond', '現金': 'cat-cash',
+  '其他': 'cat-cash',
 };
 
 // ── Formatters ──
@@ -628,11 +630,19 @@ legendEl.innerHTML = D.assets.map((a, i) => {
 
   // 持有數量 × 最新報價（原幣）
   let holdLine = '';
+  const noPrice = a.source === '查無報價';   // API 查不到此代號報價
+  const fmtQty  = q => Number(q).toLocaleString('zh-TW',
+                   {minimumFractionDigits:0, maximumFractionDigits: q < 1 ? 6 : q < 1000 ? 4 : 2});
   if (a.amount != null && a.price_native != null) {
-    const qtyStr = `${fmtDec(a.amount, a.amount < 1 ? 4 : 0)} ${a.unit || ''}`.trim();
+    // 數量小數位：整數股數顯示 0 位、加密幣等保留小數（min 0 不補零，max 視量級）
+    const qtyStr = `${fmtQty(a.amount)} ${a.unit || ''}`.trim();
     const pd     = a.price_native < 1 ? 4 : a.price_native < 100 ? 2 : 0;
     holdLine = `${qtyStr} × ${fmtDec(a.price_native, pd)} ${a.currency || ''}`;
     if (a.source && a.source !== '—') holdLine += `｜${a.source}`;
+  } else if (noPrice) {
+    // 數量有但 API 查不到報價 → 明確標示，不靜默歸零
+    const qtyStr = a.amount != null ? `${fmtQty(a.amount)} ${a.unit || ''}`.trim() : '';
+    holdLine = `${qtyStr}${qtyStr ? '｜' : ''}⚠️ 查無報價`;
   }
 
   return `
@@ -641,8 +651,10 @@ legendEl.innerHTML = D.assets.map((a, i) => {
     <div class="alloc-dot" style="background:${color}"></div>
     <div class="alloc-info">
       <div class="alloc-name">${a.name || a.symbol} <span style="color:#7b82a0;font-weight:400">(${a.symbol})</span></div>
-      ${holdLine ? `<div class="alloc-sub" style="color:#9aa3b8">${holdLine}</div>` : ''}
-      <div class="alloc-sub">約 $${fmtInt(a.value_twd)} TWD${note ? ' ' + note : ''}</div>
+      ${holdLine ? `<div class="alloc-sub" style="color:${noPrice ? '#e0a72c' : '#9aa3b8'}">${holdLine}</div>` : ''}
+      <div class="alloc-sub">${noPrice
+        ? '<span style="color:#e0a72c">查無報價，未計入市值。若確定有此資產，請手動輸入報價</span>'
+        : '約 $' + fmtInt(a.value_twd) + ' TWD' + (note ? ' ' + note : '')}</div>
     </div>
     <div class="alloc-pct">${fmtPct(a.pct)}</div>
   </div>`;

@@ -1,17 +1,16 @@
-"""Bedrock 雙模型策略
+"""AI 資料彙整策略（OpenRouter 免費模型）
 
-Step 1：Claude Haiku — 彙整價格數據，計算各資產 TWD 市值、占比、退休試算
-Step 2：Claude Sonnet — 驗證 Step 1 的 JSON，補全欄位，確保格式正確後注入模板
+step1_summarize：彙整價格數據，計算各資產 TWD 市值、占比、退休試算（數字最終由純 Python 重算）。
+其餘三處 AI 呼叫：操作建議、新聞精選、花費規劃。
+
+所有 AI 呼叫經 openrouter_client.call_llm，內含三模型 fallback（429 自動換下一個）。
 """
 
 import os
 import json
-import boto3
 from datetime import datetime, timezone, timedelta
 
-_bedrock = boto3.client("bedrock-runtime", region_name=os.environ.get("BEDROCK_REGION", "ap-northeast-1"))
-HAIKU_MODEL  = os.environ.get("BEDROCK_HAIKU_MODEL",  "jp.anthropic.claude-haiku-4-5-20251001-v1:0")
-SONNET_MODEL = os.environ.get("BEDROCK_SONNET_MODEL", "jp.anthropic.claude-sonnet-4-6")
+from openrouter_client import call_llm
 
 # ── 資產分類（依用戶定義的部位結構）──
 #   現金部位：鏈上現金（穩定幣）/ 鏈下現金（法幣活存）
@@ -27,11 +26,14 @@ GROUP_MAP = {
     "加密部位": "加密部位",
     "台股": "股票部位", "日股": "股票部位", "美股": "股票部位", "港股": "股票部位",
     "債券": "債券部位",
+    "其他": "其他部位",
 }
 
 
 def _guess_category(symbol: str, api: str) -> str:
     s = symbol.upper()
+    if api == "other":
+        return "其他"
     if s in STABLECOINS:
         return "鏈上現金"
     if s.endswith("_CASH") or api == "cash":
@@ -44,22 +46,6 @@ def _guess_category(symbol: str, api: str) -> str:
     if api == "bond":
         return "債券"
     return "美股"
-
-
-def _call_bedrock(model_id: str, system: str, user: str, max_tokens: int = 4096) -> str:
-    body = {
-        "anthropic_version": "bedrock-2023-05-31",
-        "max_tokens": max_tokens,
-        "system": system,
-        "messages": [{"role": "user", "content": user}],
-    }
-    resp = _bedrock.invoke_model(
-        modelId=model_id,
-        body=json.dumps(body),
-        contentType="application/json",
-        accept="application/json",
-    )
-    return json.loads(resp["body"].read())["content"][0]["text"].strip()
 
 
 def _extract_json(text: str) -> dict:
@@ -92,7 +78,7 @@ def _build_asset_lines(assets: dict, prices: dict) -> list[dict]:
         s = sym.upper()
         if api == "binance":
             currency = "USD"
-            source   = "Binance"
+            source   = "手動輸入" if data.get("price_usd") else "Binance"
         elif api == "yahoo":
             currency = "TWD" if s.endswith((".TW", ".TWO")) else "JPY" if s.endswith(".T") else "USD"
             user_px  = data.get("price_twd") or data.get("price_usd") or data.get("price_jpy")
@@ -100,6 +86,9 @@ def _build_asset_lines(assets: dict, prices: dict) -> list[dict]:
         elif api == "bond":
             currency = "USD"
             source   = "手動市價" if data.get("market_price_usd") else "面額計價"
+        elif api == "other":
+            currency = data.get("currency", "TWD")
+            source   = "手動輸入"
         else:  # cash
             currency = data.get("currency", "TWD")
             source   = "Frankfurter匯率" if currency != "TWD" else "—"
@@ -175,7 +164,7 @@ note 欄位規則（每筆資產一句 8 字以內的中文說明）：
 categories 必須使用以下子類別名稱（依實際持有產生）：
 鏈上現金、鏈下現金、加密部位、台股、日股、美股、債券"""
 
-    raw = _call_bedrock(HAIKU_MODEL, _HAIKU_SYSTEM, prompt, max_tokens=2048)
+    raw = call_llm(_HAIKU_SYSTEM, prompt, max_tokens=2048)
     return _extract_json(raw)
 
 
@@ -396,8 +385,7 @@ def generate_recommendations(
 請給出操作建議（需考量收支狀況：有儲蓄力可建議定期定額標的與金額；已退休則重視防禦）。"""
 
     try:
-        model_id = SONNET_MODEL if advice_model == "sonnet" else HAIKU_MODEL
-        raw = _call_bedrock(model_id, _ADVICE_SYSTEM, prompt, max_tokens=1024)
+        raw = call_llm(_ADVICE_SYSTEM, prompt, max_tokens=1024)
         start = raw.find("[")
         end   = raw.rfind("]") + 1
         if start == -1:
@@ -430,7 +418,7 @@ def select_news(news_raw: list[dict]) -> list[dict]:
     candidates = news_raw[:20]
     prompt = "新聞列表：\n" + json.dumps(candidates, ensure_ascii=False, indent=1)
     try:
-        raw = _call_bedrock(HAIKU_MODEL, _NEWS_SYSTEM, prompt, max_tokens=1024)
+        raw = call_llm(_NEWS_SYSTEM, prompt, max_tokens=1024)
         start = raw.find("[")
         end   = raw.rfind("]") + 1
         if start == -1:
@@ -490,7 +478,7 @@ def generate_spending_plan(
 若已退休：聚焦控制花費與提領節奏。"""
 
     try:
-        raw  = _call_bedrock(HAIKU_MODEL, _SPENDING_SYSTEM, prompt, max_tokens=1024)
+        raw  = call_llm(_SPENDING_SYSTEM, prompt, max_tokens=1024)
         plan = _extract_json(raw)
         # 程式碼端強制補上基準數據與用戶數字（不信任模型）
         plan["monthly_twd"] = round(goal_monthly_twd)

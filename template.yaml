@@ -8,9 +8,9 @@ Globals:
     Architectures: [arm64]
     Environment:
       Variables:
-        BEDROCK_REGION: ap-northeast-1
-        BEDROCK_HAIKU_MODEL: jp.anthropic.claude-haiku-4-5-20251001-v1:0
-        BEDROCK_SONNET_MODEL: jp.anthropic.claude-sonnet-4-6
+        OPENROUTER_API_KEY: !Ref OpenRouterKeyParam
+        OPENROUTER_RACE_MODELS: !Ref OpenRouterRaceModelsParam
+        OPENROUTER_MODELS: !Ref OpenRouterModelsParam
         API_KEY: !Ref ApiKeyParam
 
 Parameters:
@@ -18,6 +18,18 @@ Parameters:
     Type: String
     NoEcho: true
     Description: Shared secret for X-Api-Key header validation
+  OpenRouterKeyParam:
+    Type: String
+    NoEcho: true
+    Description: OpenRouter API key (sk-or-...) for free-model LLM calls
+  OpenRouterRaceModelsParam:
+    Type: String
+    Default: "openai/gpt-oss-120b:free,google/gemma-4-31b-it:free"
+    Description: Free models raced concurrently (first success wins)
+  OpenRouterModelsParam:
+    Type: String
+    Default: "google/gemma-4-31b-it"
+    Description: Paid backstop models (sequential) when the free race fails
 
 Resources:
 
@@ -29,15 +41,8 @@ Resources:
       CodeUri: src/generate_report/
       Handler: app.lambda_handler
       MemorySize: 512
-      Timeout: 120
-      Policies:
-        - Statement:
-            Effect: Allow
-            Action:
-              - bedrock:InvokeModel
-            Resource:
-              - 'arn:aws:bedrock:*::foundation-model/anthropic.claude-*'
-              - !Sub 'arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/jp.anthropic.claude-*'
+      Timeout: 175
+      # AI 改由 OpenRouter（HTTPS 外呼），不再需要 Bedrock IAM 權限
       # Lambda Function URL：無 API Gateway 30 秒限制，支援完整 120 秒執行
       FunctionUrlConfig:
         AuthType: NONE

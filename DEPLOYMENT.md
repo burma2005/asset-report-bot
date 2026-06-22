@@ -30,7 +30,7 @@
 3. 接下來 Agent 會自己跑。過程中**只有四件事需要你**（詳見下表）：
    - 提供 AWS 帳號（事先註冊好）
    - Agent 要求時，開新的 PowerShell 視窗執行 `aws login`，瀏覽器按「Allow」
-   - 若 Bedrock 模型未啟用，照 Agent 指示去 Console 點一次 Model Access
+   - 提供 OpenRouter API key（到 https://openrouter.ai/keys 申請，免費模型成本 $0）
    - 告知偏好的 region（不說就用預設東京）
 
 4. 完成後用瀏覽器開啟 `index.local.html` 即可開始使用。
@@ -43,7 +43,7 @@
 |---|------|------|------|
 | 1 | 一個 AWS 帳號 | 開始前 | — |
 | 2 | 在自己的終端機執行 `aws login` 並在瀏覽器按「Allow」 | Step 2 | `aws login` 需要互動式 console，Agent 的 shell 無法開啟；憑證屬人類身分 |
-| 3 | （若 Step 3 檢查失敗）到 Bedrock Console 點擊啟用模型 | Step 3 | Model Access 申請表單需人類確認用途 |
+| 3 | 提供 OpenRouter API key（https://openrouter.ai/keys） | Step 3 | 金鑰屬使用者帳號；免費模型每日 1000 次額度、成本 $0 |
 | 4 | 部署 region 偏好（預設東京 ap-northeast-1） | 開始前 | 資料主權偏好屬使用者決策 |
 
 除上述四項，**其餘全部由 Agent 執行**。
@@ -76,27 +76,29 @@ aws sts get-caller-identity   # 成功 → 跳到 Step 3
 - 人類視窗若報 `無法辨識 'aws'` → 給他上面的 PATH 重載指令，或完整路徑 `& "C:\Program Files\Amazon\AWSCLIV2\aws.exe" login`
 - Agent **不可**嘗試在自己的 shell 跑 `aws login`——會報 `No Windows console found`
 
-## Step 3：確認 Bedrock 模型可用（Agent 執行）
+## Step 3：確認 OpenRouter 金鑰可用（Agent 執行）
+
+後端 AI 改用 OpenRouter（不再需要 AWS Bedrock），策略為「**免費競速 → 付費兜底**」：
+
+- **競速（免費，`OPENROUTER_RACE_MODELS`）**：`openai/gpt-oss-120b:free` + `google/gemma-4-31b-it:free`
+  同時發請求，誰先成功用誰（壓低延遲、互為備援）。
+- **兜底（付費，`OPENROUTER_MODELS`）**：`google/gemma-4-31b-it`
+  競速全部 429/逾時/空回時才呼叫，保證有結果（每份約 NT$0.03）。
+
+> 兩組皆為逗號分隔的環境變數，免改碼可調順序或增減模型。
+
+實測驗證（**請人類提供** OpenRouter key，Agent 用 curl 確認能回中文 JSON）：
 
 ```powershell
-aws bedrock list-inference-profiles --region ap-northeast-1 `
-  --query "inferenceProfileSummaries[?starts_with(inferenceProfileId,'jp.anthropic')].inferenceProfileId"
+curl -s https://openrouter.ai/api/v1/chat/completions `
+  -H "Authorization: Bearer <OpenRouter金鑰>" `
+  -H "Content-Type: application/json" `
+  -d '{\"model\":\"google/gemma-4-31b-it:free\",\"messages\":[{\"role\":\"user\",\"content\":\"用繁體中文回 OK\"}],\"max_tokens\":20}'
 ```
 
-預期包含 `jp.anthropic.claude-haiku-4-5-20251001-v1:0` 與 `jp.anthropic.claude-sonnet-4-6`。
-
-實測驗證（用實際 invoke 確認權限，而非只看列表）：
-
-```powershell
-$body = '{"anthropic_version":"bedrock-2023-05-31","max_tokens":20,"messages":[{"role":"user","content":"hi"}]}'
-[System.IO.File]::WriteAllText("$env:TEMP\bedrock_test.json", $body)
-aws bedrock-runtime invoke-model --region ap-northeast-1 `
-  --model-id "jp.anthropic.claude-haiku-4-5-20251001-v1:0" `
-  --body fileb://$env:TEMP\bedrock_test.json --content-type application/json "$env:TEMP\out.json"
-```
-
-- 成功回傳 JSON → 繼續
-- `AccessDeniedException` → **請人類**到 Bedrock Console（東京區）→ Model access 啟用兩個 Claude 模型，完成後 Agent 重試
+- 回傳含 `choices[0].message.content` → 繼續
+- `401` → 金鑰錯誤，請人類重新提供
+- `429`（限流）→ 屬正常，雲端執行時會自動換下一個模型
 
 ## Step 4：產生 API Key、建立部署設定（Agent 執行）
 
@@ -107,13 +109,19 @@ $b = New-Object byte[] 32; $rng.GetBytes($b)
 $key = ([Convert]::ToBase64String($b) -replace '[+/=]','').Substring(0,40)
 ```
 
-建立 `samconfig.toml`（從 `samconfig.toml.example` 複製，填入 `$key`）。
+建立 `samconfig.toml`（從 `samconfig.toml.example` 複製）。`parameter_overrides` 需同時帶兩個值（空白分隔、整行雙引號）：
+
+```
+parameter_overrides = "ApiKeyParam=<上面的$key> OpenRouterKeyParam=<OpenRouter金鑰>"
+```
+
 **第一行必須是 `version = 0.1`**，否則 `sam build` 報 `SamConfigVersionException`。
+OpenRouter key **只進** `samconfig.toml`（雲端）或 `env.json`（本地），兩者皆 gitignore，絕不進程式碼或 git。
 
 ## Step 5：部署（Agent 執行）
 
 ```powershell
-sam build    # 純 Python 依賴（boto3/httpx），Windows 打包 Linux ARM64 無相容問題
+sam build    # 純 Python 依賴（httpx），Windows 打包 Linux ARM64 無相容問題
 sam deploy   # confirm_changeset=false 已設定，不會卡互動
 ```
 
@@ -171,5 +179,7 @@ sam build; sam deploy
 | `sam build` 後 Lambda 跑不起來（import error） | 引入了含原生二進位的套件（numpy/pandas/yfinance），Windows wheel 與 Lambda Linux 不符 | requirements.txt 只允許純 Python 套件；股價用 httpx 直呼 Yahoo chart API |
 | 總資產數量級爆炸（億級） | 台股 `.TW` 被誤套 USD 匯率；債券面額被當單位數重複相乘 | 已修；改價格邏輯時務必跑 Step 7 抽查數量級 |
 | AI 回傳數字與輸入不符 | LLM 會「順手修正」原始數字 | 不可信任：所有數量/報價/市值在 AI 驗證後由 `_build_asset_lines()` 強制回寫 |
+| 報告 AI 區塊（建議/新聞/花費）空白 | OpenRouter 主力模型限流（429）或金鑰錯誤 | 模型鏈會自動 fallback；若全空檢查 `OPENROUTER_API_KEY` 是否正確帶入、額度（1000 次/天）是否用罄 |
+| `RuntimeError: OPENROUTER_API_KEY 未設定` | 環境變數未帶入 | 雲端查 `samconfig.toml` 的 `OpenRouterKeyParam`；本地查 `env.json` |
 | `aws login` 報 `No Windows console found` | Agent 的 shell 非互動式 | 這步必須由人類在自己的終端機執行 |
 | winget 裝完找不到指令 | PATH 未重載 | 用 Step 1 的 PATH 重載指令 |
