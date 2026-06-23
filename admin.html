@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>資產報告 — 管理後台（展示版）</title>
+  <!--
+    ⚠️ 這是「展示版」管理後台，僅供 GitHub repo 預覽 UI 用。
+    使用假資料、不連接任何真實後端、所有操作無作用。
+    真實後台為隨機檔名、不進版控（見 .gitignore 的 p-*.html）。
+  -->
+  <style>
+    :root {
+      --bg:#0f1117; --surface:#1a1d27; --surface2:#22263a; --border:#2e3250;
+      --text:#e8eaf0; --text-muted:#7b82a0; --accent:#5b8ef0; --green:#34c78a;
+      --red:#f05b5b; --yellow:#f0c55b; --radius:10px;
+    }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { font-family:-apple-system,'Segoe UI','PingFang TC','Microsoft JhengHei',sans-serif;
+           background:var(--bg); color:var(--text); min-height:100vh; padding:24px; }
+    .wrap { max-width:760px; margin:0 auto; }
+    .demo-banner { background:#3a2a1a; border:1px solid #7a5520; color:var(--yellow);
+      border-radius:var(--radius); padding:12px 16px; margin-bottom:16px; font-size:0.85rem; line-height:1.6; }
+    h1 { font-size:1.4rem; font-weight:800; margin-bottom:4px; }
+    h1 span { color:var(--accent); }
+    .sub { color:var(--text-muted); font-size:0.85rem; margin-bottom:20px; }
+    .card { background:var(--surface); border:1px solid var(--border);
+            border-radius:var(--radius); padding:18px; margin-bottom:16px; }
+    .card-title { font-size:0.72rem; font-weight:700; text-transform:uppercase;
+                  letter-spacing:0.08em; color:var(--text-muted); margin-bottom:12px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+    input[type=email] { flex:1; min-width:200px; background:var(--surface2);
+      border:1px solid var(--border); border-radius:8px; padding:11px 12px;
+      color:var(--text); font-size:16px; outline:none; }
+    input[type=email]:focus { border-color:var(--accent); }
+    button { padding:10px 16px; border-radius:8px; border:none; font-size:0.84rem;
+             font-weight:700; cursor:pointer; transition:opacity .15s; }
+    button:hover { opacity:0.85; }
+    .b-invite { background:var(--green); color:#fff; }
+    .b-general{ background:var(--surface2); color:var(--text); border:1px solid var(--border); }
+    .b-block  { background:var(--red); color:#fff; }
+    table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+    th { text-align:left; padding:8px 10px; font-size:0.7rem; text-transform:uppercase;
+         letter-spacing:0.05em; color:var(--text-muted); border-bottom:1px solid var(--border); }
+    td { padding:10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+    .badge { padding:2px 9px; border-radius:12px; font-size:0.72rem; font-weight:700; }
+    .r-admin   { background:#f0c55b22; color:var(--yellow); }
+    .r-invited { background:#34c78a22; color:var(--green); }
+    .r-general { background:#5b8ef022; color:var(--accent); }
+    .r-blocked { background:#f05b5b22; color:var(--red); }
+    .act-btns { display:flex; gap:5px; flex-wrap:wrap; }
+    .act-btns button { padding:5px 9px; font-size:0.74rem; }
+    .muted { color:var(--text-muted); font-size:0.8rem; }
+    @media (max-width:600px){ body{padding:12px;} td .email{word-break:break-all;} }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="demo-banner">
+    🔒 <strong>展示版</strong>　這是管理後台的 UI 預覽，使用假資料、不連接任何後端、操作無作用。<br>
+    實際後台採隨機檔名 + 後端 <code>email == ADMIN_EMAIL</code> 驗證，非管理員一律 403。
+  </div>
+
+  <h1>🛠️ 管理<span>後台</span></h1>
+  <div class="sub">設定邀請帳號（60 次/月）、封鎖帳號。僅管理員可用。</div>
+
+  <div class="card">
+    <div class="card-title">快速設定（輸入 email）</div>
+    <div class="row">
+      <input type="email" id="email-input" placeholder="someone@gmail.com" />
+      <button class="b-invite" onclick="demoNotice()">設邀請 60</button>
+      <button class="b-general" onclick="demoNotice()">設一般 12</button>
+      <button class="b-block" onclick="demoNotice()">封鎖</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">所有用過的帳號 <span class="muted">（展示假資料）</span></div>
+    <div id="list"></div>
+  </div>
+</div>
+
+<script>
+// 展示版：純前端假資料，不打任何端點
+const DEMO_USERS = [
+  { email: 'admin@example.com',   role: 'admin',   monthly_limit: 0,  used_this_month: 0 },
+  { email: 'alice@example.com',   role: 'invited', monthly_limit: 60, used_this_month: 7 },
+  { email: 'bob@example.com',     role: 'general', monthly_limit: 12, used_this_month: 12 },
+  { email: 'spammer@example.com', role: 'blocked', monthly_limit: 0,  used_this_month: 0 },
+];
+
+function roleBadge(r){ return `<span class="badge r-${r}">${r}</span>`; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+  .replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
+function demoNotice(){ alert('這是展示頁，無實際作用。真實操作需以管理員 Google 帳號於私有後台登入。'); }
+
+(function render(){
+  const users = DEMO_USERS;
+  let html = '<table><thead><tr><th>Email</th><th>層級</th><th>用量</th><th>動作</th></tr></thead><tbody>';
+  for (const u of users) {
+    const isAdmin = u.role === 'admin';
+    html += `<tr>
+      <td class="email">${esc(u.email)}</td>
+      <td>${roleBadge(u.role)}</td>
+      <td>${u.used_this_month}/${u.monthly_limit}</td>
+      <td>${isAdmin ? '<span class="muted">—</span>' : `<div class="act-btns">
+        <button class="b-invite" onclick="demoNotice()">邀請</button>
+        <button class="b-general" onclick="demoNotice()">一般</button>
+        <button class="b-block" onclick="demoNotice()">封鎖</button>
+      </div>`}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  document.getElementById('list').innerHTML = html;
+})();
+</script>
+</body>
+</html>

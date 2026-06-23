@@ -643,8 +643,34 @@ function renderReportList(reports) {
       <div style="display:flex;align-items:center;gap:8px;width:100%;padding:6px 0;border-top:${i===0?'none':'1px solid var(--border)'};">
         <span style="flex:1;font-size:0.82rem;color:var(--text);">${i===0?'最近一次':'前次'}　${fmtStamp(r.stamp)}</span>
         <button onclick="viewReport('${r.key}')" style="padding:6px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;">查看</button>
+        <button onclick="deleteReport('${r.key}')" title="刪除這份報告" style="padding:6px 10px;background:var(--surface2);color:var(--red);border:1px solid var(--border);border-radius:6px;font-size:0.82rem;cursor:pointer;">🗑️</button>
       </div>`).join('');
   wrap.style.display = 'flex';
+}
+
+// 只刷新報告清單（不重載持倉，避免覆蓋使用者正在編輯的輸入）
+async function refreshReportList() {
+  try {
+    const resp = await fetch(LAMBDA_ENDPOINT, { headers: { 'Authorization': `Bearer ${g_id_token}` } });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderReportList(data.reports || []);
+  } catch (e) {}
+}
+
+async function deleteReport(key) {
+  if (!g_id_token) { showToast('請先登入', 'error'); return; }
+  if (!confirm('確定刪除這份報告？\n此動作無法復原。')) return;
+  showToast('刪除中…', '');
+  try {
+    const resp = await fetch(`${LAMBDA_ENDPOINT}?key=${encodeURIComponent(key)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${g_id_token}` },
+    });
+    if (!resp.ok) { showToast('刪除失敗', 'error'); return; }
+    showToast('🗑️ 已刪除', 'success');
+    refreshReportList();
+  } catch (e) { showToast('刪除失敗', 'error'); }
 }
 
 // 私有查看：帶權杖向 Lambda 取 HTML → 用 blob 開啟（不經任何公開 URL）

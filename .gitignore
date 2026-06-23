@@ -10,6 +10,9 @@ env.json
 # 本地版輸入頁（含真實端點與 API Key）
 index.local.html
 
+# 真實管理後台頁（隨機檔名、不公開；repo 內僅放展示版 admin.html）
+p-*.html
+
 # 個人測試資料與產出的報告（含真實持倉）
 test_payload.json
 test_report_output.html

@@ -163,6 +163,7 @@ def _get_or_create_user(email: str) -> dict:
         "reset_month": now,
     }
     users_table.put_item(Item=user)
+    _roster_add(email)
     return user
 
 
@@ -288,8 +289,9 @@ def _list_reports(email: str) -> list[dict]:
 
 
 def _save_portfolio(email: str, assets: dict, goal: float, income: float,
-                    portfolio_data: dict | None = None):
-    """把持倉與報告摘要存進 DynamoDB。"""
+                    portfolio_data: dict | None = None, report_key: str | None = None):
+    """把持倉與報告摘要存進 DynamoDB。report_key 記錄此摘要對應哪份報告，
+    供刪除報告時判斷是否一併清除對比基準。"""
     taipei = timezone(timedelta(hours=8))
     now_str = datetime.now(taipei).isoformat()
     try:
@@ -318,6 +320,9 @@ def _save_portfolio(email: str, assets: dict, goal: float, income: float,
             }
             update_expr += ", report_summary = :s"
             expr_values[":s"] = json.dumps(summary, ensure_ascii=False)
+            if report_key:
+                update_expr += ", report_summary_key = :sk"
+                expr_values[":sk"] = report_key
         users_table.update_item(
             Key={"email": email},
             UpdateExpression=update_expr,
@@ -406,6 +411,120 @@ def _handle_share_report(email: str, key: str) -> dict:
     }
 
 
+def _handle_delete_report(email: str, key: str) -> dict:
+    """DELETE：驗證擁有者後刪除該報告。若刪的是 AI 對比基準那份，一併清除基準，
+    避免下次拿已刪（可能亂填）的報告做對比。"""
+    if not _owns_key(email, key):
+        return _err("Forbidden", 403)
+    try:
+        s3.delete_object(Bucket=REPORT_BUCKET, Key=key)
+    except Exception:
+        return _err("刪除失敗", 500)
+    try:
+        resp = users_table.get_item(Key={"email": email})
+        ssk = resp.get("Item", {}).get("report_summary_key")
+        # 命中對比基準那份，或 legacy 摘要無 key（無法判斷→保守清除），都清掉基準
+        if ssk == key or not ssk:
+            users_table.update_item(
+                Key={"email": email},
+                UpdateExpression="REMOVE report_summary, report_summary_key",
+            )
+    except Exception:
+        pass
+    return {
+        "statusCode": 200,
+        "headers": {**CORS_HEADERS, "Content-Type": "application/json"},
+        "body": json.dumps({"deleted": True}),
+    }
+
+
+# ── 管理後台（admin 限定；用 __roster__ 名冊索引避免 Scan，維持最小權限）──
+
+ROSTER_KEY = "__roster__"
+ROLE_LIMIT = {"invited": 60, "general": 12, "blocked": 0}
+
+
+def _is_admin(email: str) -> bool:
+    return bool(ADMIN_EMAIL) and email == ADMIN_EMAIL
+
+
+def _roster_add(email: str):
+    """把 email 加進名冊索引（String Set），供後台列出所有用過的帳號。"""
+    try:
+        users_table.update_item(
+            Key={"email": ROSTER_KEY},
+            UpdateExpression="ADD members :e",
+            ExpressionAttributeValues={":e": {email}},
+        )
+    except Exception:
+        pass
+
+
+def _handle_admin_list(requester: str) -> dict:
+    """GET admin_list：列出所有用過的帳號與其層級/用量（admin 限定）。"""
+    if not _is_admin(requester):
+        return _err("Forbidden", 403)
+    try:
+        r = users_table.get_item(Key={"email": ROSTER_KEY})
+        members = r.get("Item", {}).get("members") or set()
+    except Exception:
+        members = set()
+    users = []
+    for m in sorted(members):
+        if m == ADMIN_EMAIL:
+            users.append({"email": m, "role": "admin", "monthly_limit": 0, "used_this_month": 0})
+            continue
+        try:
+            it = users_table.get_item(Key={"email": m}).get("Item", {}) or {}
+            users.append({
+                "email": m,
+                "role": it.get("role", "general"),
+                "monthly_limit": int(it.get("monthly_limit", 12)),
+                "used_this_month": int(it.get("used_this_month", 0)),
+            })
+        except Exception:
+            users.append({"email": m, "role": "?", "monthly_limit": 0, "used_this_month": 0})
+    return {
+        "statusCode": 200,
+        "headers": {**CORS_HEADERS, "Content-Type": "application/json"},
+        "body": json.dumps({"users": users, "admin_email": requester}, ensure_ascii=False),
+    }
+
+
+def _handle_admin_set(requester: str, target: str, action: str) -> dict:
+    """POST admin_set：設定某帳號為 invited(60)/general(12)/blocked（admin 限定）。"""
+    if not _is_admin(requester):
+        return _err("Forbidden", 403)
+    target = (target or "").strip().lower()
+    if not target or "@" not in target:
+        return _err("無效的 email")
+    if target == ADMIN_EMAIL:
+        return _err("不能變更 admin 自己")
+    if action not in ROLE_LIMIT:
+        return _err("未知動作")
+    role = action
+    limit = ROLE_LIMIT[action]
+    now = _current_month()
+    try:
+        users_table.update_item(
+            Key={"email": target},
+            UpdateExpression=("SET #r = :r, monthly_limit = :l, "
+                              "used_this_month = if_not_exists(used_this_month, :z), "
+                              "reset_month = if_not_exists(reset_month, :m)"),
+            ExpressionAttributeNames={"#r": "role"},
+            ExpressionAttributeValues={":r": role, ":l": limit, ":z": 0, ":m": now},
+        )
+        _roster_add(target)  # 即使該帳號還沒登入過也納入名冊
+    except Exception:
+        return _err("設定失敗", 500)
+    return {
+        "statusCode": 200,
+        "headers": {**CORS_HEADERS, "Content-Type": "application/json"},
+        "body": json.dumps({"ok": True, "email": target, "role": role,
+                            "monthly_limit": limit}, ensure_ascii=False),
+    }
+
+
 def lambda_handler(event, _context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "")
     if method == "OPTIONS":
@@ -428,16 +547,35 @@ def lambda_handler(event, _context):
     # ── 用戶層級 ──
     user = _get_or_create_user(email)
 
-    # ── GET：list（持倉+報告清單）/ view（私有看報告）/ share（產生分享連結）──
+    # ── 黑名單：被封鎖帳號一律拒絕（admin 為合成身分、不受影響）──
+    if user.get("role") == "blocked":
+        return _err("此帳號已停用", 403)
+
+    qs = event.get("queryStringParameters") or {}
+    action = qs.get("action") or ""
+
+    # ── GET：list / view / share / admin_list ──
     if method == "GET":
-        qs = event.get("queryStringParameters") or {}
-        action = qs.get("action") or "list"
         key = qs.get("key") or ""
         if action == "view":
             return _handle_view_report(email, key)
         if action == "share":
             return _handle_share_report(email, key)
+        if action == "admin_list":
+            return _handle_admin_list(email)
         return _handle_get_portfolio(email, user)
+
+    # ── DELETE：刪除指定報告（不扣額度）──
+    if method == "DELETE":
+        return _handle_delete_report(email, qs.get("key") or "")
+
+    # ── POST：admin_set（管理）或 產報告 ──
+    if action == "admin_set":
+        try:
+            body = json.loads(event.get("body") or "{}")
+        except json.JSONDecodeError:
+            return _err("Request body must be valid JSON")
+        return _handle_admin_set(email, body.get("target_email"), body.get("admin_action"))
 
     # ── POST：產報告（扣額度）──
     quota_err = _check_and_bump_quota(user)
@@ -474,11 +612,11 @@ def lambda_handler(event, _context):
     html, portfolio_data = asyncio.run(
         run(assets, goal, income, allow_paid, report_note, prev_summary))
 
-    _save_portfolio(email, assets, goal, income, portfolio_data)
+    report_key = _new_report_key(email) if REPORT_BUCKET else None
+    _save_portfolio(email, assets, goal, income, portfolio_data, report_key)
 
     if REPORT_BUCKET:
-        # 先算 key 與端點，注入報告（讓報告內的「分享」按鈕知道自己的 key 與回呼端點），再存
-        report_key = _new_report_key(email)
+        # 注入報告（讓報告內的「分享」按鈕知道自己的 key 與回呼端點），再存
         html = (html.replace("__REPORT_SHARE_KEY__", report_key)
                     .replace("__REPORT_SHARE_ENDPOINT__", _self_endpoint(event)))
         _put_report(email, report_key, html)
