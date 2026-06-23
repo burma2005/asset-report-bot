@@ -23,41 +23,38 @@
 ## 系統架構
 
 ```mermaid
-%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'20px'}, 'flowchart': {'nodeSpacing': 60, 'rankSpacing': 70}}}%%
+%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'18px'}, 'flowchart': {'nodeSpacing': 55, 'rankSpacing': 65}}}%%
 flowchart TB
-    CF["🌐 CloudFront CDN<br/>HTTPS + OAC"]
-    S3F["📦 前端 S3（私有）<br/>index.html"]
-    S3R["🔒 報告 S3（私有）<br/>僅 Lambda 簽名存取"]
-    GIS["Google Identity Services<br/>OAuth 2.0 登入"]
-    FURL["Lambda Function URL<br/>Bearer Token 驗證"]
-    LB["⚙️ Lambda<br/>Python 3.11 / ARM64"]
-    DB["🗄️ DynamoDB<br/>用戶層級 + 額度 + 持倉"]
-
-    CF --> S3F
-    CF -->|"瀏覽器"| GIS -->|"ID Token"| CF
-    CF -->|"POST/GET + Bearer Token"| FURL --> LB
-    LB <--> DB
-    LB <-->|"存報告 / 驗身分後讀 / 簽分享連結"| S3R
-```
-
-```mermaid
-%%{init: {'theme':'dark', 'themeVariables': {'fontSize':'20px'}, 'flowchart': {'nodeSpacing': 60, 'rankSpacing': 70}}}%%
-flowchart LR
-    LB["⚙️ Lambda"]
-
-    subgraph APIs["📡 官方資料來源"]
-        BN["Binance<br/>幣價・24h・K線"]
-        YF["Yahoo Finance<br/>股價・新聞・K線"]
-        FK["Frankfurter<br/>匯率"]
+    subgraph Client["使用者裝置"]
+        U["瀏覽器<br/>手機 / 電腦"]
     end
 
-    subgraph AI["🤖 OpenRouter（9 並行呼叫）"]
-        R1["開源模型競速<br/>gpt-oss-120b + gemma-4-31b"]
-        R2["付費兜底<br/>gemma-4-31b（invited/admin）"]
+    G["Google Identity Services<br/>OAuth 2.0 登入"]
+
+    subgraph AWS["AWS（無伺服器，閒置零成本）"]
+        CF["CloudFront CDN<br/>HTTPS + OAC"]
+        S3F["S3 前端桶（私有）<br/>index.html"]
+        S3R["S3 報告桶（私有）<br/>presigned 限時存取"]
+        FURL["Lambda Function URL<br/>Bearer Token 驗證"]
+        LB["Lambda<br/>Python 3.11 / ARM64"]
+        DB[("DynamoDB<br/>層級 / 額度 / 持倉 / 名冊")]
     end
 
-    LB <--> BN & YF & FK
-    LB <--> R1 --> R2
+    subgraph Ext["外部服務"]
+        API["官方 API<br/>Binance · Yahoo · Frankfurter"]
+        AI["OpenRouter<br/>開源模型 + 付費兜底"]
+    end
+
+    U -->|"載入網頁"| CF --> S3F
+    U -->|"登入"| G
+    G -->|"ID Token"| U
+    U -->|"POST / GET + Token"| FURL --> LB
+    LB -->|"驗 Token"| G
+    LB <-->|"讀寫"| DB
+    LB -->|"即時報價/新聞/匯率"| API
+    LB -->|"AI 分析"| AI
+    LB -->|"存報告 / 簽分享連結"| S3R
+    LB -->|"回傳報告"| U
 ```
 
 ---
