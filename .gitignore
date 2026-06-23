@@ -19,6 +19,9 @@ portfolio_report*.html
 # Google OAuth client secret
 client_secret_*.json
 
+# 部署注入產物（含真實端點，不進 git）
+dist/
+
 # Python
 __pycache__/
 *.pyc

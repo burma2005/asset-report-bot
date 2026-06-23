@@ -14,6 +14,7 @@ Globals:
         GOOGLE_CLIENT_ID: !Ref GoogleClientIdParam
         ADMIN_EMAIL: !Ref AdminEmailParam
         USERS_TABLE: !Ref UsersTable
+        REPORT_BUCKET: !Ref ReportBucket
 
 Parameters:
   GoogleClientIdParam:
@@ -21,7 +22,7 @@ Parameters:
     Description: Google OAuth 2.0 Client ID for ID token verification
   AdminEmailParam:
     Type: String
-    Default: "burma2005@gmail.com"
+    Default: ""
     Description: Admin email (unlimited quota, paid backstop allowed)
   OpenRouterKeyParam:
     Type: String
@@ -58,17 +59,97 @@ Resources:
       FunctionName: asset-report-generator
       CodeUri: src/generate_report/
       Handler: app.lambda_handler
+      # 512MB 已足夠（實測峰值約 156MB）。報告耗時主要是等 AI（I/O bound），
+      # 加記憶體無助於縮短，僅徒增成本，故維持 512。
       MemorySize: 512
       Timeout: 300
+      # 註：本帳號 Lambda 並行度上限為 10，帳號層級已天然封頂爆炸半徑（洪水攻擊時
+      # 超量請求由 AWS 直接節流，連帶封頂 DynamoDB / OpenRouter 下游成本）。
+      # 故不另設 ReservedConcurrentExecutions（會使未保留並行度低於 AWS 最低值 10 而失敗）。
       Policies:
-        - DynamoDBCrudPolicy:
-            TableName: !Ref UsersTable
+        # 最小權限：只給程式實際用到的 3 個動作（無 Scan/Query/DeleteItem），
+        # 避免 Lambda 被攻陷時整張用戶表（持倉/email）被拖庫。
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt UsersTable.Arn
+        - S3CrudPolicy:
+            BucketName: !Ref ReportBucket
       FunctionUrlConfig:
         AuthType: NONE
         Cors:
           AllowOrigins: ['*']
           AllowMethods: ['*']
           AllowHeaders: [content-type, authorization]
+
+  # ── S3：前端靜態檔（全私有，只走 CloudFront OAC） ──
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── S3：使用者報告（完全私有，不掛 CloudFront；只靠 Lambda 簽 presigned URL 存取） ──
+  ReportBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # ── CloudFront OAC ──
+  FrontendOAC:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Name: asset-report-frontend-oac
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  # ── CloudFront Distribution ──
+  FrontendDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_200
+        Origins:
+          - Id: S3Origin
+            DomainName: !GetAtt FrontendBucket.RegionalDomainName
+            OriginAccessControlId: !Ref FrontendOAC
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods: [GET, HEAD]
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+
+  # ── S3 BucketPolicy：只允許 CloudFront OAC 讀取 ──
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucket
+      PolicyDocument:
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: cloudfront.amazonaws.com
+            Action: s3:GetObject
+            Resource: !Sub "${FrontendBucket.Arn}/*"
+            Condition:
+              StringEquals:
+                AWS:SourceArn: !Sub "arn:aws:cloudfront::${AWS::AccountId}:distribution/${FrontendDistribution.Id}"
 
 Outputs:
   ReportEndpointUrl:
@@ -78,3 +159,15 @@ Outputs:
     Value: !GetAtt GenerateReportFunction.Arn
   UsersTableName:
     Value: !Ref UsersTable
+  FrontendBucketName:
+    Description: "S3 bucket for frontend static files"
+    Value: !Ref FrontendBucket
+  ReportBucketName:
+    Description: "Private S3 bucket for user reports (presigned access only)"
+    Value: !Ref ReportBucket
+  CloudFrontDomain:
+    Description: "CloudFront distribution domain name"
+    Value: !GetAtt FrontendDistribution.DomainName
+  CloudFrontDistId:
+    Description: "CloudFront distribution ID (for invalidation)"
+    Value: !Ref FrontendDistribution

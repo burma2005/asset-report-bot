@@ -20,9 +20,8 @@
 
    ```
    請閱讀 DEPLOYMENT.md 並依照其中的 Agent 部署 SOP，
-   把這個專案完整部署到我的 AWS 帳號。
-   遇到「人類介入點」時暫停並告訴我該做什麼，
-   其餘步驟全部由你執行並驗證。
+   把這個專案完整部署到我的 AWS 帳號（Lambda + DynamoDB + S3 + CloudFront）。
+   遇到「人類介入點」時暫停並告訴我該做什麼，其餘步驟全部由你執行並驗證。
    ```
 
 3. 接下來 Agent 會自己跑。過程中需要你配合的事項見下表。
@@ -35,8 +34,9 @@
 |---|------|------|------|
 | 1 | AWS 帳號 + `aws login` | Step 2 | 互動式登入需人類操作 |
 | 2 | OpenRouter API key（https://openrouter.ai/keys） | Step 3 | 金鑰屬使用者帳號 |
-| 3 | Google OAuth 2.0 Client ID | Step 4 | Google Cloud Console 無公開 API，需人工建立 |
-| 4 | 部署 region 偏好（預設東京 ap-northeast-1） | 開始前 | 使用者決策 |
+| 3 | 建立 Google OAuth 2.0 Client ID | Step 4 | Google Cloud Console 無公開 API，需人工建立 |
+| 4 | 部署後把 **CloudFront 域名**加進 Google「已授權 JavaScript 來源」 | Step 8 | 域名要 deploy 後才有 |
+| 5 | OAuth 同意畫面**發布成正式版**（要開放任意 Google 帳號試用時） | Step 4 | 測試模式只有測試使用者能登入 |
 
 ---
 
@@ -49,11 +49,6 @@ python --version # 預期 3.11+
 ```
 
 缺哪個裝哪個（`winget install Amazon.AWSCLI`、`winget install Amazon.SAM-CLI`）。
-安裝後需重載 PATH：
-
-```powershell
-$env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-```
 
 ## Step 2：AWS 憑證（人類介入點）
 
@@ -62,7 +57,7 @@ aws configure set region ap-northeast-1
 aws sts get-caller-identity   # 成功 → 繼續
 ```
 
-若回 `NoCredentials`：請人類開 PowerShell 執行 `aws login`，瀏覽器授權後回報。
+若回 `NoCredentials` 或 token 過期：請人類執行 `aws login`，瀏覽器授權後回報。
 
 ## Step 3：確認 OpenRouter 金鑰可用（Agent 執行）
 
@@ -79,21 +74,22 @@ curl -s https://openrouter.ai/api/v1/chat/completions `
 
 ## Step 4：Google OAuth Client ID（人類介入點）
 
-Agent 無法代勞此步驟（Google 不開放 API 建立 OAuth 憑證）。請人類：
+Agent 無法代勞（Google 不開放 API 建立 OAuth 憑證）。請人類：
 
 1. 開 https://console.cloud.google.com/apis/credentials
-2. 如需設定 OAuth 同意畫面 → 選外部 → 應用名稱隨意 → 儲存 → 發布應用程式
+2. 設定 OAuth 同意畫面 → 使用者類型選**外部 (External)**
 3. ＋建立憑證 → OAuth 用戶端 ID → 網頁應用程式
-4. 已授權的 JavaScript 來源加 `http://localhost:8000`
+4. 「已授權的 JavaScript 來源」先加 `http://localhost:8000`（本地開發用；CloudFront 域名待 Step 8 補）
 5. 把 Client ID（`xxx.apps.googleusercontent.com`）貼給 Agent
+6. **若要開放任意 Google 帳號試用**：到 OAuth 同意畫面點「發布應用程式 (PUBLISH APP)」改成**正式版**。
+   測試模式 (Testing) 下只有「測試使用者」清單內的帳號能登入，其他帳號（含企業 Workspace 帳號）一律被擋。
 
 ## Step 5：建立部署設定（Agent 執行）
 
-建立 `samconfig.toml`（從 `samconfig.toml.example` 複製）：
+從 `samconfig.toml.example` 複製成 `samconfig.toml`（已 gitignore）：
 
 ```toml
 version = 0.1
-
 [default.deploy.parameters]
 stack_name = "asset-report-bot"
 region = "ap-northeast-1"
@@ -103,57 +99,77 @@ resolve_s3 = true
 parameter_overrides = "OpenRouterKeyParam=<key> GoogleClientIdParam=<client-id> AdminEmailParam=<admin-email>"
 ```
 
-## Step 6：部署（Agent 執行）
+## Step 6：部署（Agent 執行，首次 ~15 分鐘）
 
 ```powershell
 sam build    # 純 Python 依賴（httpx, google-auth, requests）
 sam deploy
 ```
 
-成功訊號：`Successfully created/updated stack - asset-report-bot`
-取得端點 URL：
+- **首次部署 CloudFront Distribution 約 15 分鐘**，`sam deploy` 會卡在 `CREATE_IN_PROGRESS`，屬正常。
+- 成功訊號：`Successfully created/updated stack - asset-report-bot`
+
+## Step 7：取得 outputs（Agent 執行）
 
 ```powershell
 aws cloudformation describe-stacks --stack-name asset-report-bot `
-  --query "Stacks[0].Outputs[?OutputKey=='ReportEndpointUrl'].OutputValue" --output text
+  --query "Stacks[0].Outputs" --output table
 ```
 
-## Step 7：設定前端（Agent 執行）
+記下：`ReportEndpointUrl`、`CloudFrontDomain`、`FrontendBucketName`、`CloudFrontDistId`、`ReportBucketName`。
+
+## Step 8：把 CloudFront 域名加進 Google origins（人類介入點）
+
+把 Step 7 的 `CloudFrontDomain` 給人類，請他到 https://console.cloud.google.com/apis/credentials
+編輯 OAuth Client ID → 「已授權的 JavaScript 來源」新增 `https://<CloudFrontDomain>`（**含 https、無結尾斜線**）→ 儲存（生效約數分鐘）。
+
+## Step 9：注入前端設定並上傳 S3（Agent 執行）
+
+git 版的 `index.html` 維持 `__YOUR_LAMBDA_FUNCTION_URL__` / `__YOUR_GOOGLE_CLIENT_ID__` 佔位符。
+部署時複製成 `dist/index.html`、替換真實值再上傳（兩者皆公開值，無安全疑慮）。
+
+> **注意編碼**：PowerShell 5.1 的 `Get-Content`/`Set-Content` 會把 UTF-8 中文轉成亂碼，
+> 必須用 `[System.IO.File]::ReadAllText/WriteAllText` 明確指定 UTF-8（無 BOM）。
 
 ```powershell
-Copy-Item index.html index.local.html   # 已 gitignore
+$ep  = "<ReportEndpointUrl>"
+$cid = "<GoogleClientId>"
+$bkt = "<FrontendBucketName>"
+$dist= "<CloudFrontDistId>"
+
+New-Item -ItemType Directory -Force dist | Out-Null
+$c = [System.IO.File]::ReadAllText("$PWD\index.html", [System.Text.Encoding]::UTF8)
+$c = $c -replace '__YOUR_LAMBDA_FUNCTION_URL__', $ep -replace '__YOUR_GOOGLE_CLIENT_ID__', $cid
+[System.IO.File]::WriteAllText("$PWD\dist\index.html", $c, (New-Object System.Text.UTF8Encoding($false)))
+
+aws s3 cp dist/index.html "s3://$bkt/index.html" --content-type "text/html; charset=utf-8"
+aws cloudfront create-invalidation --distribution-id $dist --paths "/index.html" "/"
 ```
 
-編輯 `index.local.html`：
-- `LAMBDA_ENDPOINT` = Step 6 的 URL
-- `GOOGLE_CLIENT_ID` = Step 4 的 Client ID
+> 日後改 `index.html` 重新上線：重跑本步驟（注入 + 上傳 + invalidation），CDN 約 1 分鐘更新。
 
-**不可把真實值寫進 `index.html`**（會進版控）。
-
-## Step 8：本地測試
-
-```powershell
-python -m http.server 8000
-```
-
-開 `http://localhost:8000/index.local.html` → Google 登入 → 產報告。
-
-驗證項目：
+## Step 10：端到端測試（開 `https://<CloudFrontDomain>`）
 
 | 測試 | 預期 |
 |------|------|
-| 無 token POST | 401 |
-| 偽造 token | 401 |
-| admin 登入產報告 | 200，無限次 |
-| general 首次登入 | DynamoDB 自動建立 general（limit=4） |
+| 開 CloudFront 網址 | 顯示輸入頁 + Google 登入按鈕 |
+| HTTP 開同網址 | 自動 302 跳 HTTPS |
+| Google 登入 | 成功（origin 已加白名單；若 `origin_mismatch` 檢查含 `https://`、無尾斜線） |
+| 產報告（第一次） | 報告以 blob 私有開啟，含「下載/分享」按鈕 |
+| 產報告（第二次） | 出現「與上次報告對比」區塊（觸發 comparison 路徑） |
+| 報告內「分享」 | 風險確認 → 24h 公開連結；無痕視窗可開、去掉簽章參數則 403 |
+| general 首次登入 | DynamoDB 自動建立 general（limit=12） |
 | general 超額 | 429 |
-| general 報告 | AI 走免費、不掉付費 |
+| 直接開報告 S3 物件 | 403（私有，僅 Lambda 簽名/驗身分可讀） |
 
-## Step 9：（選填）新增 invited 用戶
+## Step 11：（選填）新增 invited 用戶（額度 60/月）
 
 ```bash
-aws dynamodb put-item --table-name asset-report-users --region ap-northeast-1 \
-  --item '{"email":{"S":"friend@gmail.com"},"role":{"S":"invited"},"monthly_limit":{"N":"30"},"used_this_month":{"N":"0"},"reset_month":{"S":"2026-06"}}'
+aws dynamodb update-item --table-name asset-report-users --region ap-northeast-1 \
+  --key '{"email":{"S":"friend@gmail.com"}}' \
+  --update-expression "SET #r = :role, monthly_limit = :v, used_this_month = if_not_exists(used_this_month, :z), reset_month = if_not_exists(reset_month, :m)" \
+  --expression-attribute-names '{"#r":"role"}' \
+  --expression-attribute-values '{":role":{"S":"invited"},":v":{"N":"60"},":z":{"N":"0"},":m":{"S":"2026-06"}}'
 ```
 
 ---
@@ -162,11 +178,23 @@ aws dynamodb put-item --table-name asset-report-users --region ap-northeast-1 \
 
 | 症狀 | 根因 | 處置 |
 |------|------|------|
-| 瀏覽器 `Failed to fetch` | CORS `AllowHeaders` 未包含 `authorization` | 確認 `template.yaml` 的 `AllowHeaders` 含 `authorization` |
-| Google 登入按鈕不出現 | GIS 不支援 `file://` | 必須用 `python -m http.server 8000` + `http://localhost:8000` |
-| 登入後無法產報告（401） | Google Client ID 不符或 token 過期 | 確認 Lambda 環境變數 `GOOGLE_CLIENT_ID` 與前端一致 |
-| AI 區塊全空 | 免費模型限流（general）或 OpenRouter 金鑰問題 | general 屬正常（免費限制）；admin 空白則檢查金鑰 |
-| AI 區塊顯示藍色提示卡 | 免費模型額度限制，非 bug | 重新產報告即可嘗試；admin/invited 有付費兜底不受影響 |
+| 登入按鈕點了沒反應、非測試帳號無法登入 | OAuth 同意畫面在「測試」模式 | 發布成正式版（Step 4-6）；企業帳號另可能被該公司 Workspace 管理員封鎖，無解 |
+| `origin_mismatch` / 登入失敗 | Google origins 未含 CloudFront 域名或格式錯 | 加 `https://<CloudFrontDomain>`，含 https、無尾斜線 |
+| 報告中文變亂碼 | PowerShell `Get/Set-Content` 編碼問題 | 用 `[System.IO.File]::ReadAllText/WriteAllText` + UTF-8（Step 9） |
+| 改版後 CDN 仍是舊頁 | CloudFront 快取 | `aws cloudfront create-invalidation`（每月 1000 次免費） |
+| 第二次產報告 502 | comparison 程式錯誤 | 已修；若復發拉 CloudWatch 日誌看 Traceback |
+| AI 區塊顯示藍色提示卡 | 模型額度限制，非 bug | 重產即可；admin/invited 有付費兜底不受影響 |
 | `sam build` 失敗 | requirements.txt 含原生二進位套件 | 只允許純 Python 套件 |
-| DynamoDB 權限錯誤 | IAM policy 缺少 DynamoDBCrudPolicy | 確認 `template.yaml` 的 Policies 區塊 |
-| Lambda 逾時 | AI 呼叫過多，Timeout 不夠 | `template.yaml` Timeout 已設 300 秒 |
+| DynamoDB 權限錯誤 | IAM 缺對應動作 | `template.yaml` 已明列 `GetItem/PutItem/UpdateItem`，確認 stack 已更新 |
+| CloudFront 首次 deploy 卡很久 | Distribution 全球部署 | 正常，約 15 分鐘 |
+
+---
+
+## 本地開發（選填，不經 CloudFront）
+
+```powershell
+Copy-Item index.html index.local.html   # 已 gitignore
+# 編輯 index.local.html 填入真實 LAMBDA_ENDPOINT / GOOGLE_CLIENT_ID
+python -m http.server 8000
+# 開 http://localhost:8000/index.local.html（GIS 不支援 file://，且 origin 需在 Google 白名單）
+```

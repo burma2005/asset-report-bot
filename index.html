@@ -26,7 +26,11 @@
     .tab-btn {
       padding: 8px 18px; border-radius: 20px; border: 1px solid var(--border);
       background: var(--surface); color: var(--text-muted);
-      cursor: pointer; font-size: 0.85rem; font-weight: 600; transition: all 0.15s;
+      cursor: pointer; font-size: 0.85rem; font-weight: 600;
+      /* 只動顏色（便宜的重繪），不用 transition:all（避免動到 box-shadow/layout 在手機卡頓） */
+      transition: background-color 0.15s, border-color 0.15s, color 0.15s;
+      /* 消除手機 ~300ms tap delay */
+      touch-action: manipulation;
     }
     .tab-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
     .tab-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
@@ -161,6 +165,131 @@
     }
     .auth-bar button:hover { border-color: var(--red); color: var(--red); }
     #google-signin-btn { min-height: 40px; }
+
+    /* ── Privacy modal ── */
+    .modal-overlay {
+      position: fixed; inset: 0; z-index: 200;
+      background: rgba(0,0,0,0.7); backdrop-filter: blur(4px);
+      display: flex; align-items: center; justify-content: center;
+      padding: 16px;
+    }
+    .modal-card {
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: 12px; padding: 28px 24px; max-width: 480px; width: 100%;
+      max-height: 85vh; overflow-y: auto;
+    }
+    .modal-title { font-size: 1.15rem; font-weight: 800; margin-bottom: 16px; }
+    .modal-body { font-size: 0.85rem; color: var(--text-muted); line-height: 1.7; }
+    .modal-body p { margin-bottom: 12px; }
+    .modal-body strong { color: var(--text); }
+    .modal-section { margin-bottom: 14px; }
+    .modal-section-title {
+      font-size: 0.78rem; font-weight: 700; color: var(--accent);
+      margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .modal-body ul { padding-left: 18px; margin: 4px 0; }
+    .modal-body li { margin-bottom: 4px; }
+    .modal-btn {
+      width: 100%; margin-top: 8px; padding: 12px;
+      background: var(--accent); color: #fff; border: none;
+      border-radius: 8px; font-size: 0.95rem; font-weight: 700;
+      cursor: pointer; transition: opacity 0.15s;
+    }
+    .modal-btn:hover { opacity: 0.85; }
+
+    /* ── Mobile responsive ── */
+    @media (max-width: 640px) {
+      body { padding: 14px 10px; }
+      .header { margin-bottom: 20px; }
+      .header h1 { font-size: 1.25rem; }
+      .header p { font-size: 0.78rem; line-height: 1.5; }
+
+      /* Auth bar */
+      .auth-bar {
+        flex-direction: column; align-items: center;
+        gap: 8px; padding: 12px;
+      }
+      #user-info-display {
+        flex-direction: column; align-items: center; gap: 6px;
+        text-align: center;
+      }
+
+      /* Tabs → 2-column grid, prominent */
+      .tabs {
+        display: grid; grid-template-columns: 1fr 1fr;
+        gap: 8px; margin-bottom: 16px;
+      }
+      .tab-btn {
+        padding: 12px 8px; font-size: 0.82rem; border-radius: 10px;
+        text-align: center; flex-shrink: unset;
+        border-width: 2px;
+      }
+      .tab-btn.active {
+        box-shadow: 0 0 12px rgba(91,142,240,0.3);
+        border-width: 2px;
+      }
+
+      /* Card */
+      .card { padding: 12px; margin-bottom: 12px; }
+      .card-title { font-size: 0.72rem; margin-bottom: 12px; }
+
+      /* Table → stacked cards with labels */
+      .asset-table thead { display: none; }
+      .asset-table, .asset-table tbody, .asset-table tr, .asset-table td {
+        display: block; width: 100%;
+      }
+      .asset-table tr {
+        background: var(--surface2); border: 1px solid var(--border);
+        border-radius: 10px; padding: 14px 14px 10px; margin-bottom: 12px;
+        position: relative;
+      }
+      .asset-table td {
+        padding: 4px 0;
+      }
+      .asset-table td::before {
+        content: attr(data-label);
+        display: block; font-size: 0.68rem; font-weight: 700;
+        color: var(--text-muted); text-transform: uppercase;
+        letter-spacing: 0.04em; margin-bottom: 3px; margin-top: 6px;
+      }
+      .asset-table td:first-child::before { margin-top: 0; }
+      .asset-table td:last-child {
+        position: absolute; top: 10px; right: 10px;
+      }
+      .asset-table td:last-child::before { display: none; }
+      .del-btn {
+        font-size: 1.4rem; padding: 8px 12px; opacity: 0.8;
+        background: rgba(240,91,91,0.1); border-radius: 8px;
+      }
+      .asset-table input, .asset-table select {
+        font-size: 16px; padding: 11px 12px; border-radius: 8px;
+      }
+
+      /* Add row button */
+      .add-row-btn {
+        width: 100%; padding: 12px; text-align: center;
+        font-size: 0.88rem; border-radius: 8px; margin-top: 8px;
+      }
+
+      .bond-extras { grid-template-columns: 1fr; }
+
+      .endpoint-bar { flex-direction: column; }
+      .endpoint-bar input { width: 100%; }
+
+      /* Retirement goal card */
+      .card[style*="max-width:560px"] { max-width: 100% !important; }
+
+      /* Submit */
+      .submit-wrap { margin-top: 16px; }
+      .submit-btn { width: 100%; padding: 16px; font-size: 1.05rem; border-radius: 12px; }
+
+      .progress-wrap { max-width: 100%; }
+
+      .toast { left: 10px; right: 10px; max-width: none; bottom: 12px; }
+
+      /* Previous reports bar */
+      #prev-reports { justify-content: center; }
+    }
   </style>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
 </head>
@@ -169,6 +298,18 @@
 <div class="header">
   <h1>💼 資產報告 <span>產生器</span></h1>
   <p>填入你的資產持有明細，點擊「產生報告」自動查詢即時報價並輸出 HTML 報告</p>
+</div>
+
+<!-- ── In-App 瀏覽器警告（LINE/FB/IG 等內建瀏覽器無法用 Google 登入）── -->
+<div id="inapp-warning" style="display:none;margin-bottom:16px;padding:16px 18px;background:#3a2a1a;border:1px solid #7a5520;border-radius:var(--radius);line-height:1.7;">
+  <div style="font-weight:800;font-size:0.95rem;color:var(--yellow);margin-bottom:8px;">⚠️ 請用瀏覽器開啟才能登入</div>
+  <div style="font-size:0.85rem;color:var(--text);">
+    你目前是從 App 內建瀏覽器（如 LINE、Facebook、Instagram）開啟，Google 基於安全政策
+    <strong>不允許在此登入</strong>。請點右上角選單的
+    <strong>「以預設瀏覽器開啟」/「Open in browser」</strong>，改用 Chrome 或 Safari 開啟本頁。
+  </div>
+  <button onclick="copyPageUrl()" style="margin-top:12px;padding:9px 16px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:0.85rem;font-weight:700;cursor:pointer;">📋 複製網址</button>
+  <span id="copy-hint" style="margin-left:10px;font-size:0.8rem;color:var(--green);"></span>
 </div>
 
 <!-- ── 登入狀態列 ── -->
@@ -180,6 +321,8 @@
     <button onclick="signOut()">登出</button>
   </div>
 </div>
+
+<div id="prev-reports" style="display:none;gap:8px;margin-bottom:12px;padding:12px 16px;background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);align-items:center;flex-wrap:wrap;"></div>
 
 <!-- ── Tabs ── -->
 <div class="tabs">
@@ -330,11 +473,11 @@
   </div>
   <div style="display:flex;align-items:center;gap:10px;margin-top:12px;flex-wrap:wrap;">
     <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">目前月收入</span>
-    <input type="number" id="monthly-income" min="0" step="0.5" placeholder="已退休填 0"
+    <input type="number" id="monthly-income" step="0.5" placeholder="已退休填 0"
            style="width:110px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;
                   padding:8px 12px;color:var(--text);font-size:0.95rem;text-align:right;outline:none;" />
     <span style="font-size:0.88rem;color:var(--text-muted);white-space:nowrap;">萬 台幣</span>
-    <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 已退休請填 0，用於計算儲蓄力與花費建議</span>
+    <span style="font-size:0.75rem;color:var(--text-muted);margin-left:8px;">→ 已退休填 0；淨支出大於收入可填負數（如房貸），用於計算儲蓄力</span>
   </div>
 </div>
 
@@ -342,6 +485,7 @@
 <div class="submit-wrap">
   <button class="submit-btn" id="submit-btn" onclick="submitReport()">📊 產生報告</button>
   <div class="status-msg" id="status-msg"></div>
+  <a id="report-link" href="#" style="display:none;margin-top:14px;font-size:0.85rem;color:var(--accent);text-decoration:underline;">若未自動跳轉，請點此查看報告</a>
   <div class="progress-wrap" id="progress-wrap">
     <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
     <div class="progress-step" id="progress-step"></div>
@@ -349,6 +493,39 @@
 </div>
 
 <div class="toast" id="toast"></div>
+
+<!-- ── 首次登入聲明 ── -->
+<div class="modal-overlay" id="privacy-modal" style="display:none;">
+  <div class="modal-card">
+    <div class="modal-title">📋 資料保存聲明</div>
+    <div class="modal-body">
+      <p>歡迎使用<strong>資產報告產生器</strong>！在您開始之前，請了解以下資訊：</p>
+      <div class="modal-section">
+        <div class="modal-section-title">我們保存什麼</div>
+        <ul>
+          <li>您輸入的<strong>資產持倉明細</strong>（幣別、數量、報價等）</li>
+          <li>產生的<strong>報告</strong>（僅保留最近 2 份）</li>
+        </ul>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">為什麼保存</div>
+        <ul>
+          <li><strong>跨裝置同步</strong> — 換電腦或用手機登入，不必重新輸入所有持倉</li>
+          <li><strong>報告對比</strong> — 保留前次報告，方便觀察資產變化趨勢</li>
+        </ul>
+      </div>
+      <div class="modal-section">
+        <div class="modal-section-title">安全性</div>
+        <ul>
+          <li>資料僅與您的 <strong>Google 帳號</strong>綁定，他人無法存取</li>
+          <li>傳輸全程 <strong>HTTPS 加密</strong></li>
+          <li>不會分享、出售或用於任何商業用途</li>
+        </ul>
+      </div>
+    </div>
+    <button class="modal-btn" onclick="acceptPrivacy()">我了解，開始使用</button>
+  </div>
+</div>
 
 <!-- ── 常見資產下拉選單（datalist） ── -->
 <datalist id="dl-crypto">
@@ -410,6 +587,8 @@ let g_user_email = null;
 
 function handleGoogleCredentialResponse(response) {
   g_id_token = response.credential;
+  // 存 localStorage：報告以 blob 開啟、與本頁同源，分享按鈕需從此讀權杖（權杖約 1h 失效）
+  try { localStorage.setItem('g_id_token', g_id_token); } catch (e) {}
   const payload = JSON.parse(atob(g_id_token.split('.')[1]));
   g_user_email = payload.email;
   document.getElementById('google-signin-btn').style.display = 'none';
@@ -417,18 +596,142 @@ function handleGoogleCredentialResponse(response) {
   document.getElementById('user-email-display').textContent = g_user_email;
   document.getElementById('user-tier-display').textContent = '';
   document.getElementById('submit-btn').disabled = false;
+  if (!localStorage.getItem('privacy_accepted')) {
+    document.getElementById('privacy-modal').style.display = 'flex';
+  } else {
+    loadCloudPortfolio();
+  }
+}
+
+function acceptPrivacy() {
+  localStorage.setItem('privacy_accepted', '1');
+  document.getElementById('privacy-modal').style.display = 'none';
+  loadCloudPortfolio();
+}
+
+async function loadCloudPortfolio() {
+  try {
+    const resp = await fetch(LAMBDA_ENDPOINT, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${g_id_token}` },
+    });
+    if (!resp.ok) return;
+    const data = await resp.json();
+    renderReportList(data.reports || []);
+    if (!data.portfolio || !data.portfolio.assets) return;
+    const p = data.portfolio;
+    if (p.retirement_goal_monthly_twd)
+      document.getElementById('retire-goal').value = p.retirement_goal_monthly_twd / 10000;
+    if (p.monthly_income_twd)
+      document.getElementById('monthly-income').value = p.monthly_income_twd / 10000;
+    populateFromAssets(p.assets);
+    showToast('☁️ 已從雲端載入上次持倉', 'success');
+  } catch (e) { /* 靜默失敗，保留 localStorage 資料 */ }
+}
+
+// 把 stamp（YYYYMMDD-HHMMSS）轉成易讀格式
+function fmtStamp(s) {
+  if (!s || s.length < 15) return s || '';
+  return `${s.slice(0,4)}/${s.slice(4,6)}/${s.slice(6,8)} ${s.slice(9,11)}:${s.slice(11,13)}`;
+}
+
+function renderReportList(reports) {
+  const wrap = document.getElementById('prev-reports');
+  if (!reports.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.innerHTML = '<div style="width:100%;font-size:0.78rem;color:var(--text-muted);font-weight:700;margin-bottom:2px;">📁 已儲存報告（私有，僅你本人可看）</div>'
+    + reports.map((r, i) => `
+      <div style="display:flex;align-items:center;gap:8px;width:100%;padding:6px 0;border-top:${i===0?'none':'1px solid var(--border)'};">
+        <span style="flex:1;font-size:0.82rem;color:var(--text);">${i===0?'最近一次':'前次'}　${fmtStamp(r.stamp)}</span>
+        <button onclick="viewReport('${r.key}')" style="padding:6px 14px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:0.78rem;font-weight:700;cursor:pointer;">查看</button>
+      </div>`).join('');
+  wrap.style.display = 'flex';
+}
+
+// 私有查看：帶權杖向 Lambda 取 HTML → 用 blob 開啟（不經任何公開 URL）
+async function viewReport(key) {
+  if (!g_id_token) { showToast('請先登入', 'error'); return; }
+  showToast('載入報告中…', '');
+  try {
+    const resp = await fetch(`${LAMBDA_ENDPOINT}?action=view&key=${encodeURIComponent(key)}`, {
+      headers: { 'Authorization': `Bearer ${g_id_token}` },
+    });
+    if (!resp.ok) { showToast('報告載入失敗（可能已過期）', 'error'); return; }
+    const html = await resp.text();
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    window.location.href = URL.createObjectURL(blob);
+  } catch (e) { showToast('報告載入失敗', 'error'); }
+}
+
+function populateFromAssets(assets) {
+  const tbodies = ['crypto-tbody','us-stock-tbody','tw-stock-tbody','jp-stock-tbody','bond-tbody','cash-tbody','other-tbody'];
+  tbodies.forEach(id => { document.getElementById(id).innerHTML = ''; });
+
+  for (const [sym, a] of Object.entries(assets)) {
+    if (a.api === 'binance') {
+      addRow('crypto-tbody', cryptoDefaults, { symbol: sym, amount: a.amount, price: a.price_usd || '', name: a.name || '' });
+    } else if (a.api === 'yahoo' && a.category === '美股') {
+      addRow('us-stock-tbody', usStockDefaults, { symbol: sym, shares: a.shares, price: a.price_usd || '', name: a.name || '' });
+    } else if (a.api === 'yahoo' && a.category === '台股') {
+      addRow('tw-stock-tbody', twStockDefaults, { symbol: sym, shares: a.shares, price: a.price_twd || '', name: a.name || '' });
+    } else if (a.api === 'yahoo' && a.category === '日股') {
+      addRow('jp-stock-tbody', jpStockDefaults, { symbol: sym, shares: a.shares, price: a.price_jpy || '', name: a.name || '' });
+    } else if (a.api === 'bond') {
+      addRow('bond-tbody', bondDefaults, { symbol: sym, face_value: a.face_value_usd, market_price: a.market_price_usd || '', name: a.name || '' });
+    } else if (a.api === 'cash') {
+      addRow('cash-tbody', cashDefaults, { currency: a.currency, amount: a.amount, name: a.name || '' });
+    } else if (a.api === 'other') {
+      addRow('other-tbody', otherDefaults, { name: a.name, amount: a.amount, price: a.price || '', currency: a.currency || 'TWD' });
+    }
+  }
+
+  tbodies.forEach(id => {
+    if (document.getElementById(id).children.length === 0) {
+      const defaults = { 'crypto-tbody': cryptoDefaults, 'us-stock-tbody': usStockDefaults,
+        'tw-stock-tbody': twStockDefaults, 'jp-stock-tbody': jpStockDefaults,
+        'bond-tbody': bondDefaults, 'cash-tbody': cashDefaults, 'other-tbody': otherDefaults };
+      defaults[id].forEach(d => addRow(id, defaults[id], d));
+    }
+  });
 }
 
 function signOut() {
   g_id_token = null;
   g_user_email = null;
+  try { localStorage.removeItem('g_id_token'); } catch (e) {}
   document.getElementById('google-signin-btn').style.display = '';
   document.getElementById('user-info-display').style.display = 'none';
   document.getElementById('submit-btn').disabled = true;
   google.accounts.id.disableAutoSelect();
 }
 
+// 偵測 App 內建瀏覽器（webview）— Google OAuth 在這些環境會回 disallowed_useragent
+function isInAppBrowser() {
+  const ua = navigator.userAgent || '';
+  return /FBAN|FBAV|FB_IAB|Instagram|Line\/|Messenger|Twitter|MicroMessenger|WeChat|KAKAOTALK|; wv\)|Snapchat|TikTok/i.test(ua);
+}
+
+function copyPageUrl() {
+  const url = window.location.href;
+  const done = () => {
+    const hint = document.getElementById('copy-hint');
+    hint.textContent = '✓ 已複製，貼到 Chrome 開啟';
+    setTimeout(() => { hint.textContent = ''; }, 4000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(url).then(done).catch(() => prompt('請複製此網址：', url));
+  } else {
+    prompt('請複製此網址，用 Chrome 開啟：', url);
+  }
+}
+
 window.addEventListener('load', () => {
+  // App 內建瀏覽器：直接擋登入，顯示引導，避免使用者卡在 Google 403 畫面
+  if (isInAppBrowser()) {
+    document.getElementById('inapp-warning').style.display = 'block';
+    document.getElementById('google-signin-btn').style.display = 'none';
+    document.getElementById('submit-btn').disabled = true;
+    return;
+  }
   google.accounts.id.initialize({
     client_id: GOOGLE_CLIENT_ID,
     callback: handleGoogleCredentialResponse,
@@ -466,57 +769,57 @@ function addRow(tbodyId, defaults, data = null) {
 
   if (tbodyId === 'crypto-tbody') {
     row.innerHTML = `
-      <td><input type="text" list="dl-crypto" placeholder="例：BTC（可下拉選擇）" value="${d.symbol||''}" /></td>
-      <td><input type="number" placeholder="例：0.5" step="any" min="0" value="${d.amount||''}" /></td>
-      <td><input type="number" placeholder="選填，未上幣安填 USD 報價" step="any" min="0" value="${d.price||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="代號"><input type="text" list="dl-crypto" placeholder="例：BTC（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td data-label="數量"><input type="number" placeholder="例：0.5" step="any" min="0" value="${d.amount||''}" /></td>
+      <td data-label="報價 USD（選填）"><input type="number" placeholder="未上幣安填 USD 報價" step="any" min="0" value="${d.price||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'us-stock-tbody') {
     row.innerHTML = `
-      <td><input type="text" list="dl-us" placeholder="例：VOO（可下拉選擇）" value="${d.symbol||''}" /></td>
-      <td><input type="number" placeholder="例：10" step="1" min="0" value="${d.shares||''}" /></td>
-      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="代號"><input type="text" list="dl-us" placeholder="例：VOO（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td data-label="持有股數"><input type="number" placeholder="例：10" step="1" min="0" value="${d.shares||''}" /></td>
+      <td data-label="現價 USD（選填）"><input type="number" placeholder="留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'tw-stock-tbody') {
     row.innerHTML = `
-      <td><input type="text" list="dl-tw" placeholder="例：0050.TW（可下拉選擇）" value="${d.symbol||''}" /></td>
-      <td><input type="number" placeholder="例：1000（一張=1000股）" step="1" min="0" value="${d.shares||''}" /></td>
-      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="代號"><input type="text" list="dl-tw" placeholder="例：0050.TW（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td data-label="持有股數"><input type="number" placeholder="一張=1000股" step="1" min="0" value="${d.shares||''}" /></td>
+      <td data-label="現價 TWD（選填）"><input type="number" placeholder="留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'jp-stock-tbody') {
     row.innerHTML = `
-      <td><input type="text" list="dl-jp" placeholder="例：1306.T（可下拉選擇）" value="${d.symbol||''}" /></td>
-      <td><input type="number" placeholder="例：100" step="1" min="0" value="${d.shares||''}" /></td>
-      <td><input type="number" placeholder="選填，留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="代號"><input type="text" list="dl-jp" placeholder="例：1306.T（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td data-label="持有股數"><input type="number" placeholder="例：100" step="1" min="0" value="${d.shares||''}" /></td>
+      <td data-label="現價 JPY（選填）"><input type="number" placeholder="留空自動查價" step="any" min="0" value="${d.price||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'bond-tbody') {
     row.innerHTML = `
-      <td><input type="text" list="dl-bond" placeholder="例：US30Y（可下拉選擇）" value="${d.symbol||''}" /></td>
-      <td><input type="number" placeholder="例：10000" step="any" min="0" value="${d.face_value||''}" /></td>
-      <td><input type="number" placeholder="選填，留空以面額計算" step="any" min="0" value="${d.market_price||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="代號"><input type="text" list="dl-bond" placeholder="例：US30Y（可下拉選擇）" value="${d.symbol||''}" /></td>
+      <td data-label="面額 USD"><input type="number" placeholder="例：10000" step="any" min="0" value="${d.face_value||''}" /></td>
+      <td data-label="市價 USD（選填）"><input type="number" placeholder="留空以面額計算" step="any" min="0" value="${d.market_price||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'cash-tbody') {
     row.innerHTML = `
-      <td>
+      <td data-label="幣別">
         <select>
           <option value="TWD" ${d.currency==='TWD'?'selected':''}>🇹🇼 TWD</option>
           <option value="USD" ${d.currency==='USD'?'selected':''}>🇺🇸 USD</option>
           <option value="JPY" ${d.currency==='JPY'?'selected':''}>🇯🇵 JPY</option>
         </select>
       </td>
-      <td><input type="number" placeholder="0" step="any" min="0" value="${d.amount||''}" /></td>
-      <td><input type="text" placeholder="備註" value="${d.name||''}" /></td>
+      <td data-label="金額"><input type="number" placeholder="0" step="any" min="0" value="${d.amount||''}" /></td>
+      <td data-label="備註"><input type="text" placeholder="備註" value="${d.name||''}" /></td>
       <td><button class="del-btn" onclick="this.closest('tr').remove();save()">✕</button></td>`;
   } else if (tbodyId === 'other-tbody') {
     row.innerHTML = `
-      <td><input type="text" placeholder="例：黃金、房產、私募基金" value="${d.name||''}" /></td>
-      <td><input type="number" placeholder="例：1" step="any" min="0" value="${d.amount||''}" /></td>
-      <td><input type="number" placeholder="單價" step="any" min="0" value="${d.price||''}" /></td>
-      <td>
+      <td data-label="資產名稱"><input type="text" placeholder="例：黃金、房產" value="${d.name||''}" /></td>
+      <td data-label="數量"><input type="number" placeholder="例：1" step="any" min="0" value="${d.amount||''}" /></td>
+      <td data-label="單價"><input type="number" placeholder="單價" step="any" min="0" value="${d.price||''}" /></td>
+      <td data-label="幣別">
         <select>
           <option value="TWD" ${d.currency==='TWD'?'selected':''}>🇹🇼 TWD</option>
           <option value="USD" ${d.currency==='USD'?'selected':''}>🇺🇸 USD</option>
@@ -796,7 +1099,7 @@ async function submitReport() {
     }
 
     const contentType = resp.headers.get('Content-Type') || '';
-    let htmlContent;
+    let htmlContent = '';
 
     if (contentType.includes('application/json')) {
       const json = await resp.json();
@@ -805,16 +1108,16 @@ async function submitReport() {
       htmlContent = await resp.text();
     }
 
+    // 私有開啟：用 blob 在本機開報告，不經任何公開 URL
     const blob = new Blob([htmlContent], { type: 'text/html;charset=utf-8' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
-    a.download = `portfolio_report_${new Date().toISOString().slice(0,10)}.html`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const reportUrl = URL.createObjectURL(blob);
 
     stopProgress(true);
-    showStatus('✅ 報告已下載，請用瀏覽器開啟！', 'success');
+    const link = document.getElementById('report-link');
+    link.href = reportUrl;
+    link.style.display = 'inline-block';
+    showStatus('✅ 報告產生完成，正在開啟…', 'success');
+    setTimeout(() => { window.location.href = reportUrl; }, 800);
     showToast('✅ 報告產生完成！', 'success');
 
   } catch (err) {
@@ -853,6 +1156,8 @@ function showToast(msg, type = '') {
 
 document.querySelectorAll('.tab-btn').forEach(btn => {
   btn.addEventListener('click', () => {
+    // 先收起軟鍵盤，避免切換時鍵盤關閉的 reflow 造成卡頓
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     btn.classList.add('active');

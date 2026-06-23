@@ -72,7 +72,7 @@
     .page {
       max-width: 960px;
       margin: 0 auto;
-      padding: 40px 24px 60px;
+      padding: 40px 24px 80px;
     }
 
     /* ── Cover header ── */
@@ -384,14 +384,95 @@
     }
 
     @media (max-width: 640px) {
-      .cover { flex-direction: column; gap: 24px; padding: 28px 24px; }
+      .page { padding: 16px 10px 40px; }
+      .cover { flex-direction: column; gap: 16px; padding: 24px 18px; }
       .cover-right { text-align: left; }
+      .cover-title { font-size: 1.5rem; }
+      .cover-total { font-size: 1.8rem; }
       .kpi-strip { grid-template-columns: 1fr; }
+      .kpi-value { font-size: 1.3rem; }
       .charts-row { grid-template-columns: 1fr; }
       .retire-grid { grid-template-columns: 1fr; }
+      .retire-num { font-size: 1.6rem; }
+      .retire-card { padding: 20px 16px; }
+      .alloc-card { padding: 20px 16px; }
+      .footer { flex-direction: column; gap: 10px; align-items: flex-start; }
+
+      /* Asset detail table → card layout on mobile */
+      .table-card { border: none; background: none; }
+      .table-card table,
+      .table-card thead,
+      .table-card tbody,
+      .table-card tr,
+      .table-card th,
+      .table-card td { display: block; }
+      .table-card thead { display: none; }
+      .table-card tbody tr {
+        background: var(--white); border: 1px solid var(--line);
+        border-radius: var(--radius); padding: 14px 16px;
+        margin-bottom: 10px;
+      }
+      .table-card td {
+        padding: 4px 0; text-align: left !important;
+        display: flex; justify-content: space-between; align-items: center;
+      }
+      .table-card td::before {
+        font-size: 0.68rem; font-weight: 700; color: var(--ink-muted);
+        text-transform: uppercase; letter-spacing: 0.04em;
+        flex-shrink: 0; margin-right: 12px;
+      }
+      .table-card td:nth-child(1)::before { content: '資產'; }
+      .table-card td:nth-child(2)::before { content: '類別'; }
+      .table-card td:nth-child(3)::before { content: '數量'; }
+      .table-card td:nth-child(4)::before { content: '報價'; }
+      .table-card td:nth-child(5)::before { content: '來源'; }
+      .table-card td:nth-child(6)::before { content: '市值'; }
+      .table-card td:nth-child(7)::before { content: '佔比'; }
+      .bar-cell { min-width: 0; }
+      .bar-track { min-width: 32px; }
+
+      /* Drawdown table → card layout */
+      .table-card div[style*="overflow-y"] table thead { display: none; }
+      .table-card div[style*="overflow-y"] table tr {
+        display: block; padding: 10px 14px; margin-bottom: 8px;
+        background: var(--white); border: 1px solid var(--line); border-radius: var(--radius);
+      }
+      .table-card div[style*="overflow-y"] table td {
+        display: flex; justify-content: space-between; padding: 3px 0;
+        text-align: left !important;
+      }
+
+      /* Rec cards */
+      .rec-card { flex-direction: column; gap: 8px; }
+
+      /* News */
+      .news-card { padding: 12px 14px; }
+      .news-title { font-size: 0.82rem; }
+
+      /* Alert cards */
+      .alert-card { padding: 12px 14px; }
     }
 
+    /* ── Floating toolbar ── */
+    .report-toolbar {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: rgba(15,17,23,0.92); backdrop-filter: blur(10px);
+      border-top: 1px solid var(--line);
+      padding: 10px 20px; display: flex; justify-content: center;
+      gap: 12px; z-index: 100;
+    }
+    .toolbar-btn {
+      padding: 10px 24px; border-radius: 8px; border: none;
+      font-size: 0.85rem; font-weight: 700; cursor: pointer;
+      text-decoration: none; display: inline-flex; align-items: center; gap: 6px;
+      transition: opacity 0.15s;
+    }
+    .toolbar-btn:hover { opacity: 0.85; }
+    .btn-download { background: #5b8ef0; color: #fff; }
+    .btn-prev { background: rgba(255,255,255,0.1); color: #e8eaf0; border: 1px solid rgba(255,255,255,0.2); }
+
     @media print {
+      .report-toolbar { display: none; }
       body { background: var(--surface); }
       .page { padding: 20px; }
       .cover { -webkit-print-color-adjust: exact; }
@@ -413,6 +494,19 @@
       <div class="cover-total"><sub>NT$</sub><span id="cover-total">—</span></div>
       <div class="cover-date" id="cover-date">—</div>
     </div>
+  </div>
+
+  <!-- Comparison with previous report -->
+  <div id="comparison-section" style="display:none">
+    <div class="section-title">📈 與上次報告對比</div>
+    <div class="alert-card alert-ok" id="comparison-header" style="margin-bottom:10px">
+      <div class="alert-icon">📊</div>
+      <div>
+        <div class="alert-title" id="comparison-title"></div>
+        <div class="alert-detail" id="comparison-delta"></div>
+      </div>
+    </div>
+    <div class="alert-card alert-ok" id="comparison-card" style="line-height:1.8;font-size:0.88rem"></div>
   </div>
 
   <!-- AI Summary -->
@@ -574,6 +668,14 @@
 // ── Data injected by Lambda ──
 const D = __PORTFOLIO_DATA__;
 
+// ── HTML 跳脫：所有寫入 innerHTML 的使用者/AI 文字皆須經此處理，防 XSS ──
+function esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 // ── Palette ──
 const PALETTE = [
   '#5b8ef0','#a78bfa','#2dd4bf','#fbbf24','#fb7185',
@@ -615,7 +717,7 @@ document.getElementById('footer-ts').textContent   = '資料更新：' + D.gener
 // 選填封面標註（如「虛構持倉範例」），醒目黃字
 if (D.report_note) {
   const sub = document.querySelector('.cover-sub');
-  if (sub) sub.innerHTML = `<span style="color:#fbbf24;font-weight:800">⚠ ${D.report_note}</span>　` + sub.textContent;
+  if (sub) sub.innerHTML = `<span style="color:#fbbf24;font-weight:800">⚠ ${esc(D.report_note)}</span>　` + sub.textContent;
 }
 });
 
@@ -660,7 +762,7 @@ new Chart(allocCtx, {
 const legendEl = document.getElementById('alloc-legend');
 legendEl.innerHTML = D.assets.map((a, i) => {
   const color = PALETTE[i % PALETTE.length];
-  const note  = a.note ? `（${a.note}）` : '';
+  const note  = a.note ? `（${esc(a.note)}）` : '';
 
   // 持有數量 × 最新報價（原幣）
   let holdLine = '';
@@ -684,7 +786,7 @@ legendEl.innerHTML = D.assets.map((a, i) => {
     <div class="alloc-num">${i + 1}.</div>
     <div class="alloc-dot" style="background:${color}"></div>
     <div class="alloc-info">
-      <div class="alloc-name">${a.name || a.symbol} <span style="color:#7b82a0;font-weight:400">(${a.symbol})</span></div>
+      <div class="alloc-name">${esc(a.name || a.symbol)} <span style="color:#7b82a0;font-weight:400">(${esc(a.symbol)})</span></div>
       ${holdLine ? `<div class="alloc-sub" style="color:${noPrice ? '#e0a72c' : '#9aa3b8'}">${holdLine}</div>` : ''}
       <div class="alloc-sub">${noPrice
         ? '<span style="color:#e0a72c">查無報價，未計入市值。若確定有此資產，請手動輸入報價</span>'
@@ -749,8 +851,8 @@ if (alerts.length === 0) {
     <div class="alert-card alert-${a.level}">
       <div class="alert-icon">${a.level === 'danger' ? '🚨' : '⚠️'}</div>
       <div>
-        <div class="alert-title">${a.title}</div>
-        <div class="alert-detail">${a.detail}</div>
+        <div class="alert-title">${esc(a.title)}</div>
+        <div class="alert-detail">${esc(a.detail)}</div>
       </div>
     </div>`).join('');
 }
@@ -764,7 +866,7 @@ const tbody  = document.getElementById('asset-tbody');
 tbody.innerHTML = D.assets.map((a, i) => {
   const catCls  = CAT_CLASS[a.category] || 'cat-cash';
   const barW    = (a.value_twd / maxVal * 100).toFixed(1);
-  const abbr    = a.symbol.replace(/\.(TW|TWO|T|HK|L)$/i, '').slice(0, 4);
+  const abbr    = esc(a.symbol.replace(/\.(TW|TWO|T|HK|L)$/i, '').slice(0, 4));
   const color   = PALETTE[i % PALETTE.length];
   const qtyStr  = a.amount != null
     ? `${fmtDec(a.amount, a.amount % 1 === 0 ? 0 : a.amount < 1 ? 4 : 2)} ${a.unit || ''}`
@@ -788,8 +890,8 @@ tbody.innerHTML = D.assets.map((a, i) => {
       <div class="sym-cell">
         <div class="sym-icon" style="border-color:${color}20;color:${color}">${abbr}</div>
         <div>
-          <div class="sym-name">${a.symbol}</div>
-          <div class="sym-full">${a.name || ''}</div>
+          <div class="sym-name">${esc(a.symbol)}</div>
+          <div class="sym-full">${esc(a.name || '')}</div>
         </div>
       </div>
     </td>
@@ -856,7 +958,7 @@ try {
     if (kaArr.length === 0) {
       const notice = document.createElement('div');
       notice.style.cssText = 'margin-bottom:12px;width:100%';
-      notice.innerHTML = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>K 線技術分析由 AI 模型生成，目前因免費模型額度限制未能產出。圖表數據不受影響，重新產生報告即可嘗試取得 AI 操作建議。</div></div>`;
+      notice.innerHTML = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>K 線技術分析由 AI 模型生成，目前因模型額度限制未能產出。圖表數據不受影響，重新產生報告即可嘗試取得 AI 操作建議。</div></div>`;
       grid.appendChild(notice);
     }
     const sigColor = {'偏多':'#34d399','偏空':'#fb7185','中性':'#8892a4'};
@@ -874,19 +976,19 @@ try {
         <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
             <div style="display:flex;gap:8px;align-items:center">
-              <span style="font-size:0.78rem;color:var(--ink-muted)">${ka.trend || ''}</span>
-              <span style="padding:2px 10px;border-radius:12px;font-size:0.72rem;font-weight:700;background:${sc}22;color:${sc}">${ka.signal || ''}</span>
+              <span style="font-size:0.78rem;color:var(--ink-muted)">${esc(ka.trend || '')}</span>
+              <span style="padding:2px 10px;border-radius:12px;font-size:0.72rem;font-weight:700;background:${sc}22;color:${sc}">${esc(ka.signal || '')}</span>
             </div>
             <div style="display:flex;gap:12px;font-size:0.75rem;color:var(--ink-muted)">
-              ${ka.support ? '<span>支撐：<strong style="color:#34d399">'+ka.support+'</strong></span>' : ''}
-              ${ka.resistance ? '<span>壓力：<strong style="color:#fb7185">'+ka.resistance+'</strong></span>' : ''}
+              ${ka.support ? '<span>支撐：<strong style="color:#34d399">'+esc(ka.support)+'</strong></span>' : ''}
+              ${ka.resistance ? '<span>壓力：<strong style="color:#fb7185">'+esc(ka.resistance)+'</strong></span>' : ''}
             </div>
           </div>
-          <div style="font-size:0.82rem;line-height:1.7;color:var(--ink-light)">${ka.analysis || ''}</div>
+          <div style="font-size:0.82rem;line-height:1.7;color:var(--ink-light)">${esc(ka.analysis || '')}</div>
         </div>`;
       }
       card.innerHTML = `
-        <div class="chart-card-title">${sym}${assetInfo.name ? '・' + assetInfo.name : ''}（${ccy}）</div>
+        <div class="chart-card-title">${esc(sym)}${assetInfo.name ? '・' + esc(assetInfo.name) : ''}（${esc(ccy)}）</div>
         <div id="kline-${i}" style="height:220px"></div>${kaHtml}`;
       grid.appendChild(card);
 
@@ -962,7 +1064,7 @@ if (sp) {
   document.getElementById('bench-bars').innerHTML = rows.map(r => `
     <div style="margin-bottom:12px">
       <div style="display:flex;justify-content:space-between;font-size:0.76rem;margin-bottom:4px">
-        <span style="color:${r.me ? 'var(--blue)' : 'var(--ink-muted)'};font-weight:${r.me ? 800 : 400}">${r.name}</span>
+        <span style="color:${r.me ? 'var(--blue)' : 'var(--ink-muted)'};font-weight:${r.me ? 800 : 400}">${esc(r.name)}</span>
         <strong style="color:${r.me ? 'var(--blue)' : 'var(--ink)'}">NT$ ${fmtInt(r.amount)}</strong>
       </div>
       <div style="height:8px;border-radius:99px;background:var(--line);overflow:hidden">
@@ -975,7 +1077,7 @@ if (sp) {
   document.getElementById('breakdown-area').innerHTML = bd.map((b, i) => `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
       <div class="legend-dot" style="background:${PALETTE[i % PALETTE.length]}"></div>
-      <span style="flex:1;font-size:0.82rem">${b.item}</span>
+      <span style="flex:1;font-size:0.82rem">${esc(b.item)}</span>
       <strong style="font-size:0.82rem">NT$ ${fmtInt(b.amount)}</strong>
       <span style="font-size:0.72rem;color:var(--ink-muted);min-width:42px;text-align:right">${fmtDec(b.amount / sp.monthly_twd * 100, 0)}%</span>
     </div>`).join('');
@@ -986,8 +1088,8 @@ if (sp) {
     <div class="alert-card ${sp.monthly_twd < 24574 ? 'alert-warning' : 'alert-ok'}">
       <div class="alert-icon">💡</div>
       <div>
-        <div class="alert-title">${sp.assessment}：${sp.summary || ''}</div>
-        <div class="alert-detail">${tips.map(t => '・' + t).join('<br>')}</div>
+        <div class="alert-title">${esc(sp.assessment)}：${esc(sp.summary || '')}</div>
+        <div class="alert-detail">${tips.map(t => '・' + esc(t)).join('<br>')}</div>
       </div>
     </div>`;
 }
@@ -1063,20 +1165,40 @@ const newsEl = document.getElementById('news-area');
 const news = D.news || [];
 newsEl.innerHTML = news.length === 0
   ? '<div class="news-card"><div class="news-title">暫無相關重大新聞</div><div class="news-meta">資料來源：Yahoo Finance</div></div>'
-  : news.map(n => `
-    <a class="news-card" href="${n.url}" target="_blank" rel="noopener">
-      <div class="news-title">${n.title_zh}</div>
-      <div class="news-meta"><span class="news-tag">${n.related || '總經'}</span>${n.source || ''}</div>
-    </a>`).join('');
+  : news.map(n => {
+      const safeUrl = /^https?:\/\//i.test(n.url || '') ? esc(n.url) : '#';
+      return `
+    <a class="news-card" href="${safeUrl}" target="_blank" rel="noopener">
+      <div class="news-title">${esc(n.title_zh)}</div>
+      <div class="news-meta"><span class="news-tag">${esc(n.related || '總經')}</span>${esc(n.source || '')}</div>
+    </a>`; }).join('');
 });
-const AI_FALLBACK = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>本區塊由 AI 模型生成，目前因免費模型額度限制未能產出。這不影響報告的數據正確性（所有數字皆由程式精算），重新產生報告即可嘗試取得 AI 分析。</div></div>`;
+const AI_FALLBACK = `<div class="ai-fallback"><span class="ai-fallback-icon">🔄</span><div>本區塊由 AI 模型生成，目前因模型額度限制未能產出。這不影響報告的數據正確性（所有數字皆由程式精算），重新產生報告即可嘗試取得 AI 分析。</div></div>`;
+
+// ── 與上次報告對比 ──
+safe('comparison', () => {
+  if (!D.comparison) return;
+  document.getElementById('comparison-section').style.display = 'block';
+  const prevTotal = D.prev_total_twd || 0;
+  const currTotal = D.total_twd || 0;
+  const delta = currTotal - prevTotal;
+  const deltaPct = prevTotal > 0 ? ((delta / prevTotal) * 100).toFixed(1) : '—';
+  const sign = delta >= 0 ? '+' : '';
+  const color = delta >= 0 ? 'var(--green)' : '#e74c3c';
+  document.getElementById('comparison-title').textContent =
+    `上次報告：${D.prev_generated_at || '未知'}`;
+  document.getElementById('comparison-delta').innerHTML =
+    `總資產變化：<strong style="color:${color}">${sign}NT$ ${Math.abs(delta).toLocaleString()}（${sign}${deltaPct}%）</strong>`;
+  document.getElementById('comparison-card').innerHTML =
+    `<div class="alert-icon">🤖</div><div>${esc(D.comparison)}</div>`;
+});
 
 // ── AI 投資組合總評 ──
 safe('ai_summary', () => {
   document.getElementById('ai-summary-section').style.display = 'block';
   const s = D.ai_summary;
   document.getElementById('ai-summary-card').innerHTML = s
-    ? `<div class="alert-icon">🤖</div><div>${s}</div>`
+    ? `<div class="alert-icon">🤖</div><div>${esc(s)}</div>`
     : AI_FALLBACK;
 });
 // ── AI 風險評估 ──
@@ -1084,7 +1206,7 @@ safe('risk_narrative', () => {
   document.getElementById('risk-narrative-section').style.display = 'block';
   const r = D.risk_narrative;
   document.getElementById('risk-narrative-card').innerHTML = r
-    ? `<div class="alert-icon">🛡️</div><div>${r}</div>`
+    ? `<div class="alert-icon">🛡️</div><div>${esc(r)}</div>`
     : AI_FALLBACK;
 });
 // ── AI 逐筆資產點評 ──
@@ -1094,8 +1216,8 @@ safe('asset_commentary', () => {
   document.getElementById('asset-commentary-area').innerHTML = ac.length > 0
     ? ac.map(a => `
       <div class="rec-card">
-        <span class="rec-action rec-觀察" style="min-width:60px;text-align:center">${a.symbol}</span>
-        <div style="flex:1"><div class="rec-reason">${a.commentary || ''}</div></div>
+        <span class="rec-action rec-觀察" style="min-width:60px;text-align:center">${esc(a.symbol)}</span>
+        <div style="flex:1"><div class="rec-reason">${esc(a.commentary || '')}</div></div>
       </div>`).join('')
     : AI_FALLBACK;
 });
@@ -1105,7 +1227,7 @@ safe('retirement_narrative', () => {
   el.style.display = 'block';
   const rn = D.retirement_narrative;
   el.innerHTML = rn
-    ? `<strong style="color:rgba(255,255,255,0.5);font-size:0.75rem">AI 退休分析</strong><br>${rn}`
+    ? `<strong style="color:rgba(255,255,255,0.5);font-size:0.75rem">AI 退休分析</strong><br>${esc(rn)}`
     : AI_FALLBACK;
 });
 // ── AI 資產再配置建議 ──
@@ -1123,7 +1245,7 @@ safe('realloc', () => {
           <div class="alert-icon">📊</div>
           <div>
             <div class="alert-title">目前配置風格評估</div>
-            <div class="alert-detail">${ra.current_assessment}</div>
+            <div class="alert-detail">${esc(ra.current_assessment)}</div>
           </div>
         </div>`;
     }
@@ -1133,18 +1255,18 @@ safe('realloc', () => {
       const color = profileColors[p.name] || 'var(--blue)';
       const allocItems = Object.entries(p.target_allocation || {}).map(([k,v]) =>
         `<div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px">
-          <span>${k}</span><strong>${v}%</strong></div>`).join('');
+          <span>${esc(k)}</span><strong>${esc(v)}%</strong></div>`).join('');
       const regionItems = Object.entries(p.regional_mix || {}).map(([k,v]) =>
         `<div style="display:flex;justify-content:space-between;font-size:0.8rem;margin-bottom:4px">
-          <span>${k}</span><strong>${v}%</strong></div>`).join('');
+          <span>${esc(k)}</span><strong>${esc(v)}%</strong></div>`).join('');
       return `<div class="chart-card" style="border-top:3px solid ${color}">
-        <div class="chart-card-title" style="color:${color}">${p.name}</div>
-        <div style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:12px">${p.description || ''}</div>
+        <div class="chart-card-title" style="color:${color}">${esc(p.name)}</div>
+        <div style="font-size:0.78rem;color:var(--ink-muted);margin-bottom:12px">${esc(p.description || '')}</div>
         <div style="font-size:0.72rem;font-weight:700;color:var(--ink-muted);margin-bottom:6px">目標部位配置</div>
         ${allocItems}
         <div style="font-size:0.72rem;font-weight:700;color:var(--ink-muted);margin:12px 0 6px">區域配置</div>
         ${regionItems}
-        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:0.85rem;line-height:1.7">${p.advice || ''}</div>
+        <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);font-size:0.85rem;line-height:1.7">${esc(p.advice || '')}</div>
       </div>`;
     }).join('');
 
@@ -1154,7 +1276,7 @@ safe('realloc', () => {
           <div class="alert-icon">🌍</div>
           <div>
             <div class="alert-title">地理集中風險提醒</div>
-            <div class="alert-detail">${ra.regional_risk_note}</div>
+            <div class="alert-detail">${esc(ra.regional_risk_note)}</div>
           </div>
         </div>`;
     }
@@ -1168,6 +1290,78 @@ safe('disclaimer', () => {
     el.textContent = disc;
   }
 });
+</script>
+
+<!-- Floating toolbar -->
+<div class="report-toolbar">
+  <button class="toolbar-btn btn-download" onclick="downloadReport()">📥 下載報告</button>
+  <button class="toolbar-btn btn-prev" onclick="shareThisReport()">🔗 分享報告</button>
+</div>
+
+<!-- 分享連結框 -->
+<div id="rpt-share-box" style="display:none;position:fixed;bottom:64px;left:0;right:0;z-index:100;padding:14px 18px;background:rgba(15,17,23,0.96);border-top:1px solid var(--line);">
+  <div style="max-width:600px;margin:0 auto;">
+    <div style="font-size:0.82rem;font-weight:700;color:#34d399;margin-bottom:8px;">🔗 公開分享連結（24 小時後失效）</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <input id="rpt-share-url" type="text" readonly onclick="this.select()"
+             style="flex:1;min-width:200px;background:#22263a;border:1px solid #2e3250;border-radius:6px;padding:9px 12px;color:#e8eaf0;font-size:0.8rem;" />
+      <button onclick="rptCopyShare()" style="padding:9px 16px;background:#5b8ef0;color:#fff;border:none;border-radius:6px;font-size:0.82rem;font-weight:700;cursor:pointer;">📋 複製</button>
+      <button onclick="document.getElementById('rpt-share-box').style.display='none'" style="padding:9px 14px;background:#22263a;color:#7b82a0;border:1px solid #2e3250;border-radius:6px;font-size:0.82rem;cursor:pointer;">關閉</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const REPORT_SHARE_KEY = "__REPORT_SHARE_KEY__";
+const REPORT_SHARE_ENDPOINT = "__REPORT_SHARE_ENDPOINT__";
+
+function downloadReport() {
+  const html = document.documentElement.outerHTML;
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const d = new Date().toISOString().slice(0,10);
+  a.download = 'portfolio_report_' + d + '.html';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+async function shareThisReport() {
+  // 報告以 blob 開啟、與輸入頁同源，故可讀 localStorage 取登入權杖
+  const token = localStorage.getItem('g_id_token');
+  if (!token || !REPORT_SHARE_KEY || REPORT_SHARE_KEY.indexOf('__') === 0) {
+    alert('請先回到主頁以 Google 帳號登入後再分享。');
+    return;
+  }
+  if (!confirm(
+    '⚠️ 產生分享連結\n\n' +
+    '此為「公開」連結：任何拿到連結的人，24 小時內都能讀取這份報告（含你的完整持倉與淨資產）。\n' +
+    '連結 24 小時後自動失效。\n\n確定要產生嗎？'
+  )) return;
+  try {
+    const resp = await fetch(`${REPORT_SHARE_ENDPOINT}?action=share&key=${encodeURIComponent(REPORT_SHARE_KEY)}`, {
+      headers: { 'Authorization': `Bearer ${token}` },
+    });
+    if (!resp.ok) {
+      let msg = '產生分享連結失敗';
+      try { const e = await resp.json(); if (e.error) msg = e.error; } catch (_) {}
+      alert('⚠️ ' + msg);
+      return;
+    }
+    const data = await resp.json();
+    document.getElementById('rpt-share-url').value = data.share_url;
+    document.getElementById('rpt-share-box').style.display = 'block';
+  } catch (e) { alert('產生分享連結失敗，請重試'); }
+}
+
+function rptCopyShare() {
+  const input = document.getElementById('rpt-share-url');
+  input.select();
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(input.value).catch(() => document.execCommand('copy'));
+  } else { document.execCommand('copy'); }
+}
 </script>
 </body>
 </html>

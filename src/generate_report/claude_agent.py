@@ -224,7 +224,7 @@ import base64
 
 MEME_DIR = os.path.join(os.path.dirname(__file__), "memes")
 
-# mood → [(檔名, 台詞), ...]，同 mood 多張隨機挑
+# mood → [(檔名, 台詞), ...]；選圖為確定性：依清單序取第一張未用過的（非隨機），used 集合避免同份報告重複
 MEME_LIBRARY: dict[str, list[tuple[str, str]]] = {
     "depeg":     [("depeg.jpg",     "那當然是騙人的啊")],
     "crash":     [("crash1.jpg",    "（初華跪地落淚）"),
@@ -252,29 +252,43 @@ MEME_LIBRARY: dict[str, list[tuple[str, str]]] = {
 }
 
 
+def _caption_for(filename: str) -> str:
+    """從 MEME_LIBRARY 反查某檔名的台詞（供 force_file 指定特定圖時用）。"""
+    for items in MEME_LIBRARY.values():
+        for fn, cap in items:
+            if fn == filename:
+                return cap
+    return ""
+
+
 def _load_meme(
     mood: str, slot: str, context: str,
     used: set | None = None,
+    force_file: str | None = None,
 ) -> dict | None:
     """slot：插入報告的段落位置（alerts/allocation/retirement/drawdown）
     context：該段落要被俏皮呼應的字眼（顯示在圖旁）
-    used：同一份報告已用過的檔名集合——優先挑未用過的，避免整份報告重複同圖"""
-    candidates = MEME_LIBRARY.get(mood, [])
-    if not candidates:
-        return None
+    used：同一份報告已用過的檔名集合——優先挑未用過的，避免整份報告重複同圖
+    force_file：指定特定檔名（略過 mood 選圖，直接用這張），台詞自動反查"""
+    if force_file:
+        filename, caption = force_file, _caption_for(force_file)
+    else:
+        candidates = MEME_LIBRARY.get(mood, [])
+        if not candidates:
+            return None
 
-    pool = candidates
-    if used is not None:
-        unused = [c for c in candidates if c[0] not in used]
-        if not unused:
-            # 同 mood 圖片用罄 → 從備用 mood 補（grind → neutral）
-            for fb in ("grind", "neutral"):
-                unused = [c for c in MEME_LIBRARY.get(fb, []) if c[0] not in used]
-                if unused:
-                    break
-        pool = unused or candidates   # 全部用過則允許重複
+        pool = candidates
+        if used is not None:
+            unused = [c for c in candidates if c[0] not in used]
+            if not unused:
+                # 同 mood 圖片用罄 → 從備用 mood 補（grind → neutral）
+                for fb in ("grind", "neutral"):
+                    unused = [c for c in MEME_LIBRARY.get(fb, []) if c[0] not in used]
+                    if unused:
+                        break
+            pool = unused or candidates   # 全部用過則允許重複
 
-    filename, caption = pool[0]       # 取序確定性：清單順序即優先序
+        filename, caption = pool[0]       # 取序確定性：清單順序即優先序
     try:
         with open(os.path.join(MEME_DIR, filename), "rb") as f:
             b64 = base64.b64encode(f.read()).decode()
@@ -304,17 +318,17 @@ def _pick_memes(
     max_down = min(changes) if changes else 0
 
     if has_depeg:
-        m = _load_meme("depeg", "alerts", "穩定幣聲稱錨定 1 USD？", used)
+        m = _load_meme("depeg", "alerts", "穩定幣聲稱錨定 1 USD？", used, force_file="dip2.jpg")
     elif max_down <= -10:
-        m = _load_meme("crash", "alerts", f"24h 最大跌幅 {max_down:.1f}%", used)
+        m = _load_meme("crash", "alerts", f"24h 最大跌幅 {max_down:.1f}%", used, force_file="crash3.jpg")
     elif max_down <= -5 and max_up >= 5:
         m = _load_meme("flipflop", "alerts", "昨漲今跌，市場變臉", used)
     elif max_down <= -5:
         m = _load_meme("dip", "alerts", f"24h 下跌 {max_down:.1f}%", used)
     elif max_up >= 10:
-        m = _load_meme("pump_big", "alerts", f"24h 大漲 {max_up:.1f}%", used)
+        m = _load_meme("pump", "alerts", f"24h 大漲 {max_up:.1f}%", used)
     elif max_up >= 5:
-        m = _load_meme("pump", "alerts", f"24h 上漲 {max_up:.1f}%", used)
+        m = _load_meme("happy", "alerts", f"24h 上漲 {max_up:.1f}%", used, force_file="happy2.jpg")
     else:
         m = None
     if m:
@@ -360,60 +374,6 @@ def _pick_memes(
         pass
 
     return memes
-
-
-# ── 操作建議（Sonnet 依配置與訊號生成）────────────────
-
-_ADVICE_SYSTEM = """你是穩健的資產配置顧問。根據用戶的資產配置、市場訊號與退休進度，給出 3~5 條簡短操作建議。
-
-規則：
-- action 只能是：加碼 / 減碼 / 不動 / 觀察 / 再平衡
-- target 為部位或資產名稱（如「加密部位」「台股」「0050.TW」）
-- reason 為一句話理由（25 字以內），務實、不誇大、不保證報酬
-- 原則：分散風險、單一部位過度集中應建議減碼、退休目標導向、長期投資
-- 只輸出 JSON 陣列，不要任何說明文字
-
-輸出格式：
-[{"action":"減碼","target":"加密部位","reason":"佔比過高，波動風險集中"},
- {"action":"不動","target":"台股","reason":"配置合理，續抱即可"}]"""
-
-
-def generate_recommendations(
-    validated: dict,
-    signals: dict,
-    monthly_income_twd: float = 0,
-    goal_monthly_twd: float = 0,
-    allow_paid: bool = True,
-) -> list[dict]:
-    income_line = (
-        f"月收入 NT$ {round(monthly_income_twd):,}，月生活費 NT$ {round(goal_monthly_twd):,}，"
-        f"月儲蓄力約 NT$ {round(monthly_income_twd - goal_monthly_twd):,}（可考慮定期定額投入）"
-        if monthly_income_twd > 0 else
-        f"已退休無工作收入，月生活費 NT$ {round(goal_monthly_twd):,}（建議應偏向防禦與現金流）"
-    )
-
-    prompt = f"""用戶資產現況：
-總資產（TWD）：{validated.get('total_twd')}
-四大部位：{json.dumps(validated.get('groups', []), ensure_ascii=False)}
-子類別：{json.dumps(validated.get('categories', []), ensure_ascii=False)}
-退休進度：{validated.get('retirement', {}).get('progress_pct', '未設定')}%
-收支狀況：{income_line}
-市場訊號（24h漲跌/脫鉤）：{json.dumps(signals, ensure_ascii=False)}
-風險示警：{json.dumps(validated.get('alerts', []), ensure_ascii=False)}
-
-請給出操作建議（需考量收支狀況：有儲蓄力可建議定期定額標的與金額；已退休則重視防禦）。"""
-
-    try:
-        raw = call_llm(_ADVICE_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid)
-        start = raw.find("[")
-        end   = raw.rfind("]") + 1
-        if start == -1:
-            return []
-        recs = json.loads(raw[start:end])
-        valid = {"加碼", "減碼", "不動", "觀察", "再平衡"}
-        return [r for r in recs if r.get("action") in valid][:5]
-    except Exception:
-        return []
 
 
 # ── 持倉相關新聞精選（Haiku 從 Yahoo 官方新聞中挑 1~3 則）──
@@ -629,6 +589,46 @@ def generate_retirement_narrative(
 _RISK_NARRATIVE_SYSTEM = """你是風險分析師，撰寫投資組合風險評估。請用繁體中文回答。
 只輸出純文字段落（2~4 句），不要 JSON、不要標題、不要條列。
 聚焦：資產集中風險、區域集中（美/台/日/加密）、幣別曝險、相關性風險、尾部風險。"""
+
+
+_COMPARISON_SYSTEM = """你是投資組合追蹤分析師，比較用戶「上次」與「本次」報告的變化。請用繁體中文回答。
+輸出格式（純文字，3~5 段，每段 1~2 句）：
+1. 總資產變化（金額與百分比）
+2. 配置結構變化（哪些部位增減，比重偏移方向）
+3. 個別資產亮點（新增、減碼、漲幅/跌幅最大的持倉）
+4. 整體趨勢判讀（健康度改善或惡化，集中風險變化）
+5. 一句具體行動建議
+不要輸出 JSON、不要標題。"""
+
+
+def generate_comparison(
+    current: dict,
+    prev_summary: dict,
+    allow_paid: bool = True,
+) -> str:
+    """AI 對比上次與本次報告，產出變化分析。"""
+    cur_top = [
+        {"symbol": a.get("symbol", ""), "name": a.get("name", ""),
+         "value_twd": a.get("value_twd", 0), "pct": a.get("pct", 0),
+         "category": a.get("category", "")}
+        for a in current.get("assets", [])[:10]
+    ]
+    prompt = f"""上次報告（{prev_summary.get('generated_at', '未知')}）：
+總資產：NT$ {prev_summary.get('total_twd', 0):,}
+部位分布：{json.dumps(prev_summary.get('groups', []), ensure_ascii=False)}
+子類別：{json.dumps(prev_summary.get('categories', []), ensure_ascii=False)}
+前十大持倉：{json.dumps(prev_summary.get('assets', [])[:10], ensure_ascii=False)}
+
+本次報告（{current.get('generated_at', '現在')}）：
+總資產：NT$ {current.get('total_twd', 0):,}
+部位分布：{json.dumps(current.get('groups', []), ensure_ascii=False)}
+子類別：{json.dumps(current.get('categories', []), ensure_ascii=False)}
+前十大持倉：{json.dumps(cur_top, ensure_ascii=False)}"""
+
+    try:
+        return call_llm(_COMPARISON_SYSTEM, prompt, max_tokens=1024, allow_paid=allow_paid).strip()
+    except Exception:
+        return ""
 
 
 def generate_risk_narrative(
@@ -873,6 +873,7 @@ def generate_portfolio_data(
     retirement_goal_monthly_twd: float = 0,
     monthly_income_twd: float = 0,
     allow_paid: bool = True,
+    prev_summary: dict | None = None,
 ) -> dict:
     """回傳可注入 HTML 模板的 PORTFOLIO_DATA dict。"""
     summary   = step1_haiku_summarize(assets, prices, allow_paid=allow_paid)
@@ -977,10 +978,10 @@ def generate_portfolio_data(
                 pass
     validated["drawdown"] = drawdown
 
-    # 八個獨立 AI 呼叫平行執行，縮短總延遲
+    # 獨立 AI 呼叫平行執行，縮短總延遲
     klines = prices.get("klines", {})
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=8) as pool:
+    with ThreadPoolExecutor(max_workers=9) as pool:
         fut_news = pool.submit(select_news, prices.get("news_raw", []), allow_paid)
         fut_plan = pool.submit(
             generate_spending_plan,
@@ -1006,6 +1007,10 @@ def generate_portfolio_data(
         fut_kline = pool.submit(
             generate_kline_analysis,
             klines, validated.get("assets", []), allow_paid)
+        fut_comparison = None
+        if prev_summary:
+            fut_comparison = pool.submit(
+                generate_comparison, validated, prev_summary, allow_paid)
         news      = fut_news.result()
         plan      = fut_plan.result()
         summary_result       = fut_summary.result()
@@ -1014,6 +1019,7 @@ def generate_portfolio_data(
         risk_narrative       = fut_risk.result()
         reallocation_result  = fut_realloc.result()
         kline_analysis       = fut_kline.result()
+        comparison_result    = fut_comparison.result() if fut_comparison else None
     # 持倉相關新聞（平行結果）
     validated["news"] = news
 
@@ -1030,6 +1036,10 @@ def generate_portfolio_data(
     validated["reallocation"] = reallocation_result
     validated["kline_analysis"] = kline_analysis
     validated["ai_disclaimer"] = AI_DISCLAIMER
+    validated["comparison"] = comparison_result
+    if prev_summary:
+        validated["prev_generated_at"] = prev_summary.get("generated_at", "")
+        validated["prev_total_twd"] = prev_summary.get("total_twd", 0)
 
     # 波動資產日線 K 線（近 90 日，模板渲染蠟燭圖）
     validated["klines"] = klines
