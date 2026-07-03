@@ -146,8 +146,14 @@ def _verify_google_token(token: str) -> dict:
 def _get_or_create_user(email: str) -> dict:
     """從 DynamoDB 取得用戶，不存在則自動建立 general 層級。"""
     if email == ADMIN_EMAIL:
-        return {"email": email, "role": "admin", "monthly_limit": 999999,
-                "used_this_month": 0, "reset_month": _current_month()}
+        admin_user = {"email": email, "role": "admin", "monthly_limit": 999999,
+                      "used_this_month": 0, "reset_month": _current_month()}
+        # 管理員的持倉仍存在 DynamoDB，需一併帶出，否則換裝置登入會看不到上次資產
+        resp = users_table.get_item(Key={"email": email})
+        stored = resp.get("Item")
+        if stored and "portfolio" in stored:
+            admin_user["portfolio"] = stored["portfolio"]
+        return admin_user
 
     resp = users_table.get_item(Key={"email": email})
     user = resp.get("Item")
