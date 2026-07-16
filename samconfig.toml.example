@@ -9,4 +9,7 @@ resolve_s3 = true
 # GoogleClientIdParam：Google Cloud Console 建立 OAuth 2.0 Client ID（Web application）
 # AdminEmailParam：管理員 email（無限額度 + 付費兜底）
 # OpenRouterKeyParam：到 https://openrouter.ai/keys 申請（sk-or-... 開頭）
+# 模型參數可省略（用 template.yaml 預設：免費 openrouter/free、付費 google/gemma-4-31b-it）。
+#   若要覆寫，付費兜底 OpenRouterModelsParam 務必用「不帶 :free」的付費 slug，否則等於沒兜底。
+#   免費/付費模型可用 scripts/or_models.py 健檢與熱抽換（見 DEPLOYMENT.md）。
 parameter_overrides = "OpenRouterKeyParam=<你的OpenRouter金鑰> GoogleClientIdParam=<你的Google-Client-ID>.apps.googleusercontent.com AdminEmailParam=<你的email>"

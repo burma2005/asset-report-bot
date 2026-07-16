@@ -163,11 +163,13 @@ sequenceDiagram
 
 | 階段 | 模型 | 機制 | 費用 |
 |------|------|------|------|
-| 競速 | `openai/gpt-oss-120b:free` + `google/gemma-4-31b-it:free` | 同時發，誰先成功用誰 | **$0** |
-| 兜底（付費） | `google/gemma-4-31b-it` | 競速全限流才呼叫（invited/admin 限定） | ~$0.03/份 |
+| 競速（免費） | `openrouter/free` | OpenRouter 自動路由至當下可用的免費模型（自癒，免手動追換下架的 slug）| **$0** |
+| 兜底（付費） | `google/gemma-4-31b-it` | 競速全限流／逾時才呼叫（invited/admin 限定） | ~$0.03/份 |
 
-- general 層級 `allow_paid=False`，模型全限流時 AI 區塊空白但數字正常
+- general 層級 `allow_paid=False`，只走免費競速；模型全限流時 AI 區塊空白但數字正常
+- admin/invited 預設仍走免費競速，僅在免費全失敗（限流/逾時）時才落到付費兜底
 - 9 個 AI 呼叫並行執行，總延遲約 2 分鐘
+- 免費模型常被 OpenRouter 下架或限流；用 [`scripts/or_models.py`](scripts/or_models.py) 可隨時健檢與熱抽換（免重新部署），詳見 [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## 資安設計
 

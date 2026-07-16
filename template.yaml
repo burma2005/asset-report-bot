@@ -30,8 +30,8 @@ Parameters:
     Description: OpenRouter API key (sk-or-...) for free-model LLM calls
   OpenRouterRaceModelsParam:
     Type: String
-    Default: "openai/gpt-oss-120b:free,google/gemma-4-31b-it:free"
-    Description: Free models raced concurrently (first success wins)
+    Default: "openrouter/free"
+    Description: Free models raced concurrently (first success wins). openrouter/free auto-routes to an available free model.
   OpenRouterModelsParam:
     Type: String
     Default: "google/gemma-4-31b-it"

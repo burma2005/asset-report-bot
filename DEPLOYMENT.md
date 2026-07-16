@@ -65,12 +65,14 @@ aws sts get-caller-identity   # 成功 → 繼續
 curl -s https://openrouter.ai/api/v1/chat/completions `
   -H "Authorization: Bearer <OpenRouter金鑰>" `
   -H "Content-Type: application/json" `
-  -d '{"model":"google/gemma-4-31b-it:free","messages":[{"role":"user","content":"OK"}],"max_tokens":10}'
+  -d '{"model":"google/gemma-4-31b-it","messages":[{"role":"user","content":"OK"}],"max_tokens":10}'
 ```
 
 - 回傳含 `choices` → 繼續
 - `401` → 金鑰錯誤
 - `429`（限流）→ 正常，雲端會自動 fallback
+
+> 用付費 slug `google/gemma-4-31b-it`（**不要**帶 `:free`）驗金鑰，免受免費限流干擾。
 
 ## Step 4：Google OAuth Client ID（人類介入點）
 
@@ -183,10 +185,32 @@ aws dynamodb update-item --table-name asset-report-users --region ap-northeast-1
 | 報告中文變亂碼 | PowerShell `Get/Set-Content` 編碼問題 | 用 `[System.IO.File]::ReadAllText/WriteAllText` + UTF-8（Step 9） |
 | 改版後 CDN 仍是舊頁 | CloudFront 快取 | `aws cloudfront create-invalidation`（每月 1000 次免費） |
 | 第二次產報告 502 | comparison 程式錯誤 | 已修；若復發拉 CloudWatch 日誌看 Traceback |
-| AI 區塊顯示藍色提示卡 | 模型額度限制，非 bug | 重產即可；admin/invited 有付費兜底不受影響 |
+| AI 區塊顯示藍色提示卡 | 免費模型全限流；或兜底 slug 被誤設成 `:free`（付費沒真的呼叫到）| 重產即可；若連 admin 也整份缺，跑 `python scripts/or_models.py check --deployed` 檢查模型是否可達，見下方「維護：模型健檢與熱抽換」 |
 | `sam build` 失敗 | requirements.txt 含原生二進位套件 | 只允許純 Python 套件 |
 | DynamoDB 權限錯誤 | IAM 缺對應動作 | `template.yaml` 已明列 `GetItem/PutItem/UpdateItem`，確認 stack 已更新 |
 | CloudFront 首次 deploy 卡很久 | Distribution 全球部署 | 正常，約 15 分鐘 |
+
+---
+
+## 維護：模型健檢與熱抽換（免重新部署）
+
+OpenRouter 的免費模型常被下架或限流。[`scripts/or_models.py`](scripts/or_models.py) 可隨時健檢並**只覆寫** `OPENROUTER_RACE_MODELS` / `OPENROUTER_MODELS` 兩個 Lambda 環境變數（其餘變數與金鑰不動、約 10 秒生效、不必 `sam deploy`）。
+
+```powershell
+# 健檢線上目前設定的模型是否可達
+python scripts/or_models.py check --deployed
+
+# 列出 OpenRouter 目前所有 :free 模型（挑替代品）
+python scripts/or_models.py list-free
+
+# 熱抽換（免重新部署）
+python scripts/or_models.py set --race "openrouter/free" --backstop "google/gemma-4-31b-it"
+```
+
+- **免費競速**建議用 `openrouter/free`：OpenRouter 自動路由到當下可用的免費模型，免手動追換下架的 slug。
+- **付費兜底**用真正的付費 slug `google/gemma-4-31b-it`（**切勿**帶 `:free`，否則等於沒兜底）。
+- ⚠️ `set` 是熱改線上設定，**下次 `sam deploy` 會用 `samconfig.toml` 的值覆蓋回去**。要永久固定，請把同值一併寫進 `samconfig.toml` 的 `parameter_overrides`（或更新 `template.yaml` 的 `Default`）。
+- 金鑰只從 `env.json` 讀取供健檢用，工具全程不列印任何機密。
 
 ---
 
