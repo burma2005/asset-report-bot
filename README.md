@@ -163,12 +163,14 @@ sequenceDiagram
 
 | 階段 | 模型 | 機制 | 費用 |
 |------|------|------|------|
-| 競速（免費） | `openrouter/free` | OpenRouter 自動路由至當下可用的免費模型（自癒，免手動追換下架的 slug）| **$0** |
-| 兜底（付費） | `google/gemma-4-31b-it` | 競速全限流／逾時才呼叫（invited/admin 限定） | ~$0.03/份 |
+| 免費 | `openrouter/free` | OpenRouter 自動路由至當下可用的免費模型（自癒，免手動追換下架的 slug）| **$0** |
+| 兜底（付費） | `google/gemma-4-31b-it` | 免費限流／逾時才呼叫（invited/admin 限定） | ~$0.03/份 |
 
-- general 層級 `allow_paid=False`，只走免費競速；模型全限流時 AI 區塊空白但數字正常
-- admin/invited 預設仍走免費競速，僅在免費全失敗（限流/逾時）時才落到付費兜底
-- 9 個 AI 呼叫並行執行，總延遲約 2 分鐘
+> **為何不做多模型競速**：免費模型常被 OpenRouter 下架或輪換，寫死多支 slug 會不斷失效需維護。改為只保留自動路由的 `openrouter/free` 由 OpenRouter 挑當下可用的免費模型，**以穩定性與免維護為優先，略微犧牲速度**（少了「最快者勝」的加速）。等久一點可接受。
+
+- general 層級 `allow_paid=False`，只走免費模型；模型全限流時 AI 區塊空白但數字正常
+- admin/invited 預設仍走免費模型，僅在免費失敗（限流/逾時）時才落到付費兜底
+- 9 個 AI 呼叫並行執行；因無競速加速，總延遲較長（視免費 provider 負載而定）
 - 免費模型常被 OpenRouter 下架或限流；用 [`scripts/or_models.py`](scripts/or_models.py) 可隨時健檢與熱抽換（免重新部署），詳見 [DEPLOYMENT.md](DEPLOYMENT.md)
 
 ## 資安設計
@@ -211,7 +213,7 @@ asset-report-bot/
 └── src/generate_report/
     ├── app.py                    # 入口：JWT 驗簽 → 層級/額度 → S3 報告私有存取（view/share）
     ├── price_fetcher.py          # 並行抓價/匯率/新聞（純 Python）
-    ├── openrouter_client.py      # OpenRouter：競速 + 付費兜底
+    ├── openrouter_client.py      # OpenRouter：免費自動路由 + 付費兜底
     ├── claude_agent.py           # 9 項 AI 分析 + 報告對比 + 確定性計算 + 梗圖引擎
     ├── report_template.html      # 報告 HTML 模板（手機版 responsive + 下載/分享按鈕）
     ├── requirements.txt          # httpx, google-auth, requests
